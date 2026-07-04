@@ -115,7 +115,9 @@ const res = await apiGetRaw("/slow", {
 
 - `apiGet` / `apiPost` / `apiPut` / `apiPatch` / `apiDelete` — null-collapsing (`Promise<T | null>`).
 - `apiGetRaw` / `apiPostRaw` / `apiPutRaw` / `apiPatchRaw` / `apiDeleteRaw` — full envelope (`Promise<ApiResult<T>>`).
-- `apiGetTyped` / `apiPostTyped` / `apiPutTyped` / `apiPatchTyped` / `apiDeleteTyped` — decoder-validated, null-collapsing.
+- `apiGetTyped` / `apiPostTyped` — decoder-validated, null-collapsing.
+
+> Decoder validation on `apiPut` / `apiPatch` / `apiDelete` (and their `*Raw` forms) is available via the `decoder` option — e.g. `apiPut(path, body, { decoder })` — rather than dedicated `*Typed` helpers.
 
 ### Timeout
 

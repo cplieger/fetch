@@ -66,35 +66,6 @@ export function apiPostTyped<T>(
   return request<T>("POST", path, { ...opts, body, decoder });
 }
 
-/** PUT with runtime validation; returns the decoded body or `null` on any error. */
-export function apiPutTyped<T>(
-  path: string,
-  body: unknown,
-  decoder: Decoder<T>,
-  opts?: RequestOptions<T>,
-): Promise<T | null> {
-  return request<T>("PUT", path, { ...opts, body, decoder });
-}
-
-/** PATCH with runtime validation; returns the decoded body or `null` on any error. */
-export function apiPatchTyped<T>(
-  path: string,
-  body: unknown,
-  decoder: Decoder<T>,
-  opts?: RequestOptions<T>,
-): Promise<T | null> {
-  return request<T>("PATCH", path, { ...opts, body, decoder });
-}
-
-/** DELETE with runtime validation; returns the decoded body or `null` on any error. */
-export function apiDeleteTyped<T>(
-  path: string,
-  decoder: Decoder<T>,
-  opts?: RequestOptions<T>,
-): Promise<T | null> {
-  return request<T>("DELETE", path, { ...opts, decoder });
-}
-
 // --- Envelope helpers (return the full ApiResult) --------------------------
 
 /** GET; returns the full {@link ApiResult} envelope. */
