@@ -1,0 +1,63 @@
+// @vitest-environment node
+//
+// Client-side "invalid" classification (F2). These run under the *node*
+// environment rather than happy-dom: they rely on the platform's strict
+// validation of header names, timeout ranges, and JSON encoding to make the
+// build phase throw. happy-dom's Headers / AbortSignal stubs are lenient and
+// would let an invalid request build; Node's undici Headers and
+// AbortSignal.timeout match real browser/runtime behaviour, so requestRaw sees
+// the throw and classifies it as "invalid" (never "network").
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { configureFetch, resetFetchConfig } from "./config.js";
+import { requestRaw } from "./request.js";
+
+function stubFetch(res: Response): typeof fetch {
+  return vi.fn().mockResolvedValue(res) as unknown as typeof fetch;
+}
+
+beforeEach(() => {
+  resetFetchConfig();
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("requestRaw — client-side 'invalid' classification (never throws)", () => {
+  it("classifies an un-encodable (circular) body as invalid, status 0, without fetching", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ fetchFn });
+    const circular: Record<string, unknown> = {};
+    circular["self"] = circular;
+    const r = await requestRaw("POST", "/x", { body: circular });
+    expect(r).toMatchObject({ ok: false, status: 0, code: "invalid" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("classifies an invalid header name as invalid, not network", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ fetchFn });
+    const r = await requestRaw("GET", "/x", { headers: { "Bad Header": "x" } });
+    expect(r).toMatchObject({ ok: false, status: 0, code: "invalid" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("classifies a negative timeoutMs as invalid", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ fetchFn });
+    const r = await requestRaw("GET", "/x", { timeoutMs: -1 });
+    expect(r).toMatchObject({ ok: false, status: 0, code: "invalid" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("classifies a build failure as cancelled when the caller signal is already aborted", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ fetchFn });
+    const ac = new AbortController();
+    ac.abort();
+    const circular: Record<string, unknown> = {};
+    circular["self"] = circular;
+    const r = await requestRaw("POST", "/x", { body: circular, signal: ac.signal });
+    expect(r).toMatchObject({ ok: false, status: 0, code: "cancelled" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+});

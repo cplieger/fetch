@@ -2,7 +2,7 @@
 // ---------------------------------------------------------------------------
 
 // Configuration
-export { configureFetch, resetFetchConfig } from "./config.js";
+export { configureFetch } from "./config.js";
 export type { FetchConfig } from "./config.js";
 
 // Timeout composition
@@ -20,6 +20,9 @@ export {
   apiDelete,
   apiGetTyped,
   apiPostTyped,
+  apiPutTyped,
+  apiPatchTyped,
+  apiDeleteTyped,
   apiGetRaw,
   apiPostRaw,
   apiPutRaw,

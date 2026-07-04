@@ -206,3 +206,20 @@ describe("configureFetch — merge + reset semantics", () => {
     expect(getFetchConfig()).toEqual({});
   });
 });
+
+describe("configureFetch — baseUrl origin protection", () => {
+  it("keeps the configured origin when the path is an absolute URL", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ baseUrl: "https://api.example.com/v1", fetchFn });
+    await requestRaw("GET", "https://evil.com/x");
+    // The absolute path is demoted to a path segment; the origin is preserved.
+    expect(urlOf(fetchFn)).toBe("https://api.example.com/v1/https://evil.com/x");
+  });
+
+  it("keeps the configured origin when the path is protocol-relative", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ baseUrl: "https://api.example.com/v1", fetchFn });
+    await requestRaw("GET", "//evil.com/x");
+    expect(urlOf(fetchFn)).toBe("https://api.example.com/v1//evil.com/x");
+  });
+});

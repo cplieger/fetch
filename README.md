@@ -53,12 +53,17 @@ const res = await apiGetRaw<{ id: string }>("/users/me");
 if (res.ok) {
   console.log(res.status, res.data);
 } else {
-  // res.status is the HTTP status, or 0 for a network / timeout / cancelled failure.
-  // res.code is one of "network" | "timeout" | "cancelled" | "decode", or a
-  // server-supplied code lifted from the error body.
+  // res.status is the HTTP status, or 0 for a network / timeout / cancelled /
+  // invalid failure.
+  // res.code is one of "network" | "timeout" | "cancelled" | "decode" |
+  // "invalid", or a server-supplied code lifted from the error body.
   console.error(res.status, res.code, res.error, res.requestId);
 }
 ```
+
+> On a 204 or empty-body 2xx response, a success envelope carries `data: undefined`. The null-collapsing helpers (`request` / `apiGet` / …) turn that into `null`; when you use the `*Raw` helpers on a 204-capable endpoint, type `T` to include `undefined` (or branch on `status`). A JSON `null` / `0` / `false` / `""` body is real data and passes through unchanged.
+>
+> `code: "invalid"` marks a **client-side** build failure — an un-encodable body (circular / BigInt), a bad header name/value, a bad `timeoutMs`, or a throwing `prepareHeaders` — that never reached the network, so it is reported distinctly from `"network"`.
 
 ### Runtime validation
 
@@ -79,7 +84,7 @@ const user = await apiGetTyped("/users/me", decodeUser); // { id: string } | nul
 
 ### Per-request options
 
-Every helper accepts a trailing `RequestOptions`: a caller `AbortSignal`, per-request `headers`, a `decoder`, and a `timeoutMs` override (default 30 000 ms). The caller signal is composed with the request timeout, so whichever fires first aborts the request.
+Every helper accepts a trailing `RequestOptions`: a caller `AbortSignal`, per-request `headers`, a `decoder`, and a `timeoutMs` override (default 30 000 ms). The caller signal is composed with the request timeout, so whichever fires first aborts the request. The timeout covers the network round-trip only — the global `prepareHeaders` hook runs **before** the fetch and is **not** bounded by it, so a hook that may hang (e.g. an async token refresh) must self-bound.
 
 ```typescript
 const controller = new AbortController();
@@ -90,14 +95,15 @@ const res = await apiGetRaw("/slow", {
 });
 ```
 
-> **Path contract:** `path` is expected to be a **relative** path. With `baseUrl` set, the configured scheme+host always precede it, so an absolute (`https://…`) or protocol-relative (`//host`) path is neutralised (kept as a path segment) and cannot override the origin. With `baseUrl` **unset**, `path` is passed to `fetch()` verbatim — the caller owns the full URL and must never pass untrusted input as the whole path.
+> **Path contract:** `path` is expected to be a **relative** path. With `baseUrl` set, the configured scheme+host always precede it, so an absolute (`https://…`) or protocol-relative (`//host`) path is neutralised (kept as a path segment) and cannot override the origin. For this origin-override protection to hold, `baseUrl` must be an **absolute** URL (scheme + host); an empty or relative `baseUrl` does not neutralise a protocol-relative `path`. With `baseUrl` **unset**, `path` is passed to `fetch()` verbatim — the caller owns the full URL and must never pass untrusted input as the whole path.
+>
+> **Module-global config:** `baseUrl` and `credentials` are process-global (set once via `configureFetch`) and cannot vary per in-flight request. Only `prepareHeaders` runs per call, so per-tenant SSR that needs a different origin or credentials per request must handle that outside this layer (e.g. a request-scoped fetch instance).
 
 ## API
 
 ### Configuration
 
 - `configureFetch(config)` — shallow-merge into the global fetch layer (`baseUrl`, `credentials`, `prepareHeaders`, `fetchFn`). Call at boot; successive calls accumulate.
-- `resetFetchConfig()` — reset the global config to empty. Test-only.
 - `FetchConfig` — the configuration shape.
 
 ### Request core
@@ -109,12 +115,14 @@ const res = await apiGetRaw("/slow", {
 
 - `apiGet` / `apiPost` / `apiPut` / `apiPatch` / `apiDelete` — null-collapsing (`Promise<T | null>`).
 - `apiGetRaw` / `apiPostRaw` / `apiPutRaw` / `apiPatchRaw` / `apiDeleteRaw` — full envelope (`Promise<ApiResult<T>>`).
-- `apiGetTyped` / `apiPostTyped` — decoder-validated, null-collapsing.
+- `apiGetTyped` / `apiPostTyped` / `apiPutTyped` / `apiPatchTyped` / `apiDeleteTyped` — decoder-validated, null-collapsing.
 
 ### Timeout
 
-- `withTimeout(signal, ms)` — compose an optional caller signal with a fresh timeout signal (via `AbortSignal.any`).
+- `withTimeout(signal, ms)` — compose an optional caller signal with a fresh timeout signal (via `AbortSignal.any` when available).
 - `API_TIMEOUT_MS` — default request timeout (30 000 ms).
+
+> **Runtime baseline:** `AbortSignal.timeout` is required (Chrome 103 / Safari 16 / Firefox 100 / Node 18+). Composing a caller signal with the timeout additionally needs `AbortSignal.any` (Chrome 116 / Safari 17.4 / Firefox 124 / Node 20.3+); on a runtime without it, `withTimeout` degrades to timeout-only (the caller signal is dropped, the timeout still applies) rather than failing to build the request.
 
 ### Types
 
@@ -127,13 +135,14 @@ const res = await apiGetRaw("/slow", {
 
 These features are intentionally out of scope. `@cplieger/fetch` is the request/response envelope, nothing more:
 
-| Feature                                    | Reason                                                                                                                                |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Retries / backoff                          | A dispatch-lifecycle concern. Compose with [`@cplieger/actions`](https://github.com/cplieger/actions) or a retry helper.              |
-| Idempotency-key / `X-Request-ID` injection | The caller passes these per request via `opts.headers` (or a global `prepareHeaders` hook).                                           |
-| Interceptor / middleware chains            | The single `prepareHeaders` seam plus `fetchFn` injection cover the real cases without a plugin pipeline.                             |
-| Decoder combinators                        | Ships only the `Decoder<T>` type and the optional invocation seam. Each app keeps its own validators (hand-written, zod, valibot, …). |
-| Response caching / revalidation            | Out of paradigm — this is a fetch envelope, not a data cache.                                                                         |
+| Feature                                                            | Reason                                                                                                                                                                                              |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Retries / backoff                                                  | A dispatch-lifecycle concern. Compose with [`@cplieger/actions`](https://github.com/cplieger/actions) or a retry helper.                                                                            |
+| Idempotency-key / `X-Request-ID` injection                         | The caller passes these per request via `opts.headers` (or a global `prepareHeaders` hook).                                                                                                         |
+| Interceptor / middleware chains                                    | The single `prepareHeaders` seam plus `fetchFn` injection cover the real cases without a plugin pipeline.                                                                                           |
+| Decoder combinators                                                | Ships only the `Decoder<T>` type and the optional invocation seam. Each app keeps its own validators (hand-written, zod, valibot, …).                                                               |
+| Response caching / revalidation                                    | Out of paradigm — this is a fetch envelope, not a data cache.                                                                                                                                       |
+| Non-JSON bodies / raw `Response` / response headers + `statusText` | JSON-envelope by design: the request body is JSON-encoded and the response is read as JSON (or empty). For binary / streaming bodies, response-header access, or `statusText`, drop to raw `fetch`. |
 
 ## Disclaimer
 

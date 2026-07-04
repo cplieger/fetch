@@ -144,6 +144,13 @@ describe("requestRaw — non-2xx responses", () => {
     const r = await requestRaw("GET", "/x");
     expect(r).toEqual({ ok: false, status: 422, error: "HTTP 422" });
   });
+
+  it("falls back to `HTTP <status>` when the JSON error body is a bare non-object", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify(42), { status: 400 }));
+    configureFetch({ fetchFn });
+    const r = await requestRaw("GET", "/x");
+    expect(r).toEqual({ ok: false, status: 400, error: "HTTP 400" });
+  });
 });
 
 describe("requestRaw — decoding", () => {
@@ -290,11 +297,27 @@ describe("request — null collapsing", () => {
     expect(data).toBeNull();
   });
 
-  it("returns undefined (not null) on a 204 success", async () => {
+  it("returns null (not undefined) on a 204 success — empty body collapses", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
     configureFetch({ fetchFn });
     const data = await request("DELETE", "/x");
-    expect(data).toBeUndefined();
+    expect(data).toBeNull();
+  });
+
+  it("returns null on an empty 200 body", async () => {
+    const fetchFn = stubFetch(new Response("", { status: 200 }));
+    configureFetch({ fetchFn });
+    const data = await request("GET", "/empty");
+    expect(data).toBeNull();
+  });
+
+  it("passes a JSON null / 0 / false / '' body through as real data", async () => {
+    for (const raw of ["null", "0", "false", '""'] as const) {
+      const fetchFn = stubFetch(new Response(raw, { status: 200 }));
+      configureFetch({ fetchFn });
+      const r = await requestRaw("GET", "/x");
+      expect(r).toEqual({ ok: true, status: 200, data: JSON.parse(raw) as unknown });
+    }
   });
 });
 
@@ -307,5 +330,50 @@ describe("request — global fetch fallback", () => {
     const data = await request<{ g: boolean }>("GET", "/x");
     expect(globalFetch).toHaveBeenCalledTimes(1);
     expect(data).toEqual({ g: true });
+  });
+});
+
+describe("requestRaw — buggy fetchFn results are classified, never thrown", () => {
+  it("coerces status to 0 for a truthy non-Response ({ ok: false })", async () => {
+    const fetchFn = (async () => ({ ok: false })) as unknown as typeof fetch;
+    configureFetch({ fetchFn });
+    const r = await requestRaw("GET", "/x");
+    expect(r.ok).toBe(false);
+    expect((r as { status: number }).status).toBe(0);
+  });
+
+  it("coerces a non-number status to 0 on an otherwise-ok response", async () => {
+    const fetchFn = (async () => ({
+      ok: true,
+      status: "200",
+      text: async () => JSON.stringify({ a: 1 }),
+    })) as unknown as typeof fetch;
+    configureFetch({ fetchFn });
+    const r = await requestRaw<{ a: number }>("GET", "/x");
+    expect(r).toEqual({ ok: true, status: 0, data: { a: 1 } });
+  });
+});
+
+describe("requestRaw — a null body is no body (F5)", () => {
+  it("sends neither payload nor Content-Type for a null body", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
+    configureFetch({ fetchFn });
+    await requestRaw("POST", "/x", { body: null });
+    const [, init] = callArgs(fetchFn);
+    expect(init.body).toBeUndefined();
+    expect((init.headers as Headers).get("content-type")).toBeNull();
+  });
+});
+
+describe("requestRaw — caller signal + timeout composition", () => {
+  it("composes the caller signal with the timeout and still resolves ok", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify({ v: 1 }), { status: 200 }));
+    configureFetch({ fetchFn });
+    const ac = new AbortController();
+    const r = await requestRaw("GET", "/x", { signal: ac.signal });
+    expect(r).toEqual({ ok: true, status: 200, data: { v: 1 } });
+    const [, init] = callArgs(fetchFn);
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal).not.toBe(ac.signal);
   });
 });
