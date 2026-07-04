@@ -1,8 +1,13 @@
 # fetch
 
-> Small, zero-dependency universal fetch wrapper for TypeScript with a typed, non-throwing result envelope.
+[![npm](https://img.shields.io/npm/v/@cplieger/fetch)](https://www.npmjs.com/package/@cplieger/fetch)
+[![JSR](https://jsr.io/badges/@cplieger/fetch)](https://jsr.io/@cplieger/fetch)
 
-`@cplieger/fetch` wraps the platform `fetch` with a non-throwing core: every call resolves to an `ApiResult<T>` (a discriminated `ok`/error union) instead of throwing. Zero runtime dependencies, ESM-only, published as TypeScript source.
+> Small, zero-dependency universal fetch wrapper with a typed, non-throwing result envelope.
+
+A standalone TypeScript wrapper around the platform `fetch`. The core never throws: every request resolves to an `ApiResult<T>` — a discriminated union of a success envelope (`{ ok: true, status, data }`) and an error envelope (`{ ok: false, status, error, code?, requestId? }`) — so network failures, timeouts, cancellations, non-2xx responses, and decode errors are all values you branch on rather than exceptions you catch. On top of the core sit thin per-verb helpers: a null-collapsing form (`apiGet` → `data | null`), a full-envelope form (`apiGetRaw` → `ApiResult`), and a decoder-validated form (`apiGetTyped`). Base URL, credentials, a header-preparation hook, and a custom fetch implementation are injected once via `configureFetch`. Zero runtime dependencies, ESM-only, published as TypeScript source.
+
+`@cplieger/fetch` is the browser-side JSON-fetch primitive in the toolkit: it is the inbound-shaped counterpart to [`httpx`](https://github.com/cplieger/httpx) (the resilient _outbound_ HTTP library for Go), and it composes cleanly under [`@cplieger/actions`](https://github.com/cplieger/actions) (which owns retry, dedupe, optimistic updates, and notification wiring). It deliberately owns only the request/response envelope — see [Unsupported by design](#unsupported-by-design).
 
 ## Install
 
@@ -12,24 +17,129 @@ npx jsr add @cplieger/fetch
 npm i @cplieger/fetch
 ```
 
+Requires TypeScript ≥ 5.0 and a bundler that supports ESM.
+
 ## Usage
 
+Configure the global layer once at boot, then call the verb helpers:
+
 ```typescript
-import { configureFetch, apiGet, apiGetRaw } from "@cplieger/fetch";
+import { configureFetch, apiGet, apiPost, apiGetRaw } from "@cplieger/fetch";
 
-configureFetch({ baseUrl: "https://api.example.com/v1" });
+configureFetch({
+  baseUrl: "https://api.example.com/v1",
+  credentials: "include",
+  prepareHeaders: (headers) => {
+    headers.set("Authorization", `Bearer ${getToken()}`);
+  },
+});
 
-// Null-collapsing: data on success, null on any error.
-const user = await apiGet<{ id: string }>("/users/me");
+// Null-collapsing: the decoded body on success, null on any error.
+const user = await apiGet<{ id: string; name: string }>("/users/me");
+if (user) {
+  console.log(user.name);
+}
 
-// Envelope: full status + error details, never throws.
+// Create a resource with a JSON body.
+const created = await apiPost<{ id: string }>("/items", { name: "widget" });
+```
+
+### The result envelope
+
+When you need the status code or the error details, reach for the `*Raw` helpers (or `requestRaw` directly). They resolve to an `ApiResult<T>` and never throw:
+
+```typescript
 const res = await apiGetRaw<{ id: string }>("/users/me");
 if (res.ok) {
   console.log(res.status, res.data);
 } else {
-  console.error(res.status, res.code, res.error);
+  // res.status is the HTTP status, or 0 for a network / timeout / cancelled failure.
+  // res.code is one of "network" | "timeout" | "cancelled" | "decode", or a
+  // server-supplied code lifted from the error body.
+  console.error(res.status, res.code, res.error, res.requestId);
 }
 ```
+
+### Runtime validation
+
+Pass a `Decoder<T>` — a function that returns the typed value or throws — to validate a 2xx body. A decoder throw becomes an `ApiErr` with `code: "decode"` (or `null` via the `*Typed` helpers):
+
+```typescript
+import { apiGetTyped, type Decoder } from "@cplieger/fetch";
+
+const decodeUser: Decoder<{ id: string }> = (v) => {
+  if (typeof v !== "object" || v === null || typeof (v as { id?: unknown }).id !== "string") {
+    throw new Error("expected { id: string }");
+  }
+  return v as { id: string };
+};
+
+const user = await apiGetTyped("/users/me", decodeUser); // { id: string } | null
+```
+
+### Per-request options
+
+Every helper accepts a trailing `RequestOptions`: a caller `AbortSignal`, per-request `headers`, a `decoder`, and a `timeoutMs` override (default 30 000 ms). The caller signal is composed with the request timeout, so whichever fires first aborts the request.
+
+```typescript
+const controller = new AbortController();
+const res = await apiGetRaw("/slow", {
+  signal: controller.signal,
+  timeoutMs: 5_000,
+  headers: { "X-Request-Id": crypto.randomUUID() },
+});
+```
+
+> **Path contract:** `path` is expected to be a **relative** path. With `baseUrl` set, the configured scheme+host always precede it, so an absolute (`https://…`) or protocol-relative (`//host`) path is neutralised (kept as a path segment) and cannot override the origin. With `baseUrl` **unset**, `path` is passed to `fetch()` verbatim — the caller owns the full URL and must never pass untrusted input as the whole path.
+
+## API
+
+### Configuration
+
+- `configureFetch(config)` — shallow-merge into the global fetch layer (`baseUrl`, `credentials`, `prepareHeaders`, `fetchFn`). Call at boot; successive calls accumulate.
+- `resetFetchConfig()` — reset the global config to empty. Test-only.
+- `FetchConfig` — the configuration shape.
+
+### Request core
+
+- `requestRaw<T>(method, path, opts?)` — the non-throwing core; resolves to `ApiResult<T>`.
+- `request<T>(method, path, opts?)` — null-collapsing wrapper: `data` on success, `null` on any error.
+
+### Verb helpers
+
+- `apiGet` / `apiPost` / `apiPut` / `apiPatch` / `apiDelete` — null-collapsing (`Promise<T | null>`).
+- `apiGetRaw` / `apiPostRaw` / `apiPutRaw` / `apiPatchRaw` / `apiDeleteRaw` — full envelope (`Promise<ApiResult<T>>`).
+- `apiGetTyped` / `apiPostTyped` — decoder-validated, null-collapsing.
+
+### Timeout
+
+- `withTimeout(signal, ms)` — compose an optional caller signal with a fresh timeout signal (via `AbortSignal.any`).
+- `API_TIMEOUT_MS` — default request timeout (30 000 ms).
+
+### Types
+
+- `ApiOk<T>` / `ApiErr` / `ApiResult<T>` — the result envelope union.
+- `Decoder<T>` — a runtime validator: returns the typed value or throws.
+- `HttpMethod` — `"GET" | "POST" | "PUT" | "PATCH" | "DELETE"`.
+- `RequestOptions<T>` — per-request `body`, `signal`, `headers`, `decoder`, `timeoutMs`.
+
+## Unsupported by design
+
+These features are intentionally out of scope. `@cplieger/fetch` is the request/response envelope, nothing more:
+
+| Feature                                    | Reason                                                                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Retries / backoff                          | A dispatch-lifecycle concern. Compose with [`@cplieger/actions`](https://github.com/cplieger/actions) or a retry helper.              |
+| Idempotency-key / `X-Request-ID` injection | The caller passes these per request via `opts.headers` (or a global `prepareHeaders` hook).                                           |
+| Interceptor / middleware chains            | The single `prepareHeaders` seam plus `fetchFn` injection cover the real cases without a plugin pipeline.                             |
+| Decoder combinators                        | Ships only the `Decoder<T>` type and the optional invocation seam. Each app keeps its own validators (hand-written, zod, valibot, …). |
+| Response caching / revalidation            | Out of paradigm — this is a fetch envelope, not a data cache.                                                                         |
+
+## Disclaimer
+
+This project is built with care and follows security best practices, but it is intended for personal / self-hosted use. No guarantees of fitness for production environments. Use at your own risk.
+
+This project was built with AI-assisted tooling using [Claude Opus](https://www.anthropic.com/claude) and [Kiro](https://kiro.dev). The human maintainer defines architecture, supervises implementation, and makes all final decisions.
 
 ## License
 

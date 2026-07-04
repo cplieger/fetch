@@ -1,0 +1,43 @@
+{
+  "name": "@cplieger/fetch",
+  "version": "1.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo -project tsconfig.json",
+    "typecheck:tests": "tsgo -project tsconfig.test.json",
+    "test": "vitest --run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.2",
+    "@vitest/coverage-v8": "4.1.9",
+    "eslint": "10.6.0",
+    "fast-check": "4.8.0",
+    "happy-dom": "20.10.6",
+    "prettier": "3.9.4",
+    "typescript-eslint": "8.62.1",
+    "vitest": "4.1.9"
+  },
+  "description": "Small, zero-dependency universal fetch wrapper for TypeScript with typed result envelopes",
+  "license": "GPL-3.0-or-later",
+  "types": "./src/index.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cplieger/fetch.git"
+  },
+  "files": [
+    "src/",
+    "!src/**/*.test.ts",
+    "!src/**/__test-helpers__",
+    "!src/**/fc-strict-setup.ts",
+    "jsr.json"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@cplieger/fetch",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publish": {
+    "include": ["LICENSE", "README.md", "src/**/*.ts"],
+    "exclude": ["src/**/*.test.ts", "src/**/__test-helpers__/**"]
+  }
+}
