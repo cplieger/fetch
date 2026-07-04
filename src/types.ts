@@ -15,11 +15,15 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  */
 export type Decoder<T> = (value: unknown) => T;
 
-/** Successful result envelope. `data` is the decoded/parsed body (or
- *  `undefined` for a 204 / empty body). */
+/** Successful result envelope. */
 export interface ApiOk<T> {
   readonly ok: true;
   readonly status: number;
+  /** The decoded / parsed response body. It is `undefined` for a 204 or any
+   *  empty-body response, so a caller using the `*Raw` helpers on a
+   *  204-capable endpoint should type `T` to include `undefined` (or branch on
+   *  `status`). The null-collapsing helpers (`request` / `apiGet` / …) turn
+   *  that `undefined` into `null`. */
   readonly data: T;
 }
 
@@ -30,8 +34,11 @@ export interface ApiErr {
   readonly status: number;
   /** Human-readable message. */
   readonly error: string;
-  /** Machine code: `"network"` | `"timeout"` | `"cancelled"` | `"decode"`, or
-   *  a server-supplied code lifted from the error body. */
+  /** Machine code: `"network"` | `"timeout"` | `"cancelled"` | `"decode"` |
+   *  `"invalid"`, or a server-supplied code lifted from the error body.
+   *  `"invalid"` marks a client-side build failure (an un-encodable body, a bad
+   *  header name/value, a bad `timeoutMs`, or a throwing `prepareHeaders`) that
+   *  never reached the network. */
   readonly code?: string;
   /** Lifted from the error body's `request_id` / `requestId`, when present. */
   readonly requestId?: string;

@@ -1,7 +1,7 @@
 // The non-throwing core. requestRaw builds the request, performs the fetch via
 // the configured layer, and ALWAYS resolves to an ApiResult<T> — every failure
-// mode (network, timeout, cancellation, non-2xx, decode) is returned, never
-// thrown. request() is the thin null-collapsing wrapper over it.
+// mode (invalid, network, timeout, cancellation, non-2xx, decode) is returned,
+// never thrown. request() is the thin null-collapsing wrapper over it.
 // ---------------------------------------------------------------------------
 
 import { getFetchConfig } from "./config.js";
@@ -74,11 +74,26 @@ function mergeHeaders(target: Headers, source: Record<string, string> | Headers 
 }
 
 /**
- * Classify a thrown error from the request pipeline into an ApiErr. Priority:
+ * Classify a throw from the BUILD phase (header construction, JSON body
+ * encoding, the `prepareHeaders` hook, timeout composition, url join) into an
+ * ApiErr. A caller that already aborted ⇒ "cancelled"; every other build
+ * failure is a client-side "invalid" request — it never reached the network,
+ * so classifying it as "network" would be a misdiagnosis.
+ */
+function classifyBuildError(e: unknown, callerSignal: AbortSignal | undefined): ApiErr {
+  if (callerSignal?.aborted === true) {
+    return makeErr(0, "request cancelled", "cancelled");
+  }
+  return makeErr(0, errMsg(e), "invalid");
+}
+
+/**
+ * Classify a thrown error from the FETCH / response-read phase into an ApiErr.
+ * Priority:
  *  1. caller signal already aborted → "cancelled" (status 0)
  *  2. DOMException TimeoutError / AbortError → "timeout" (status 0)
- *  3. everything else (TypeError, header-prep throw, body-read failure) →
- *     "network" (status 0)
+ *  3. everything else (TypeError, a malformed result from a custom fetchFn, a
+ *     mid-body read failure) → "network" (status 0)
  */
 function classifyThrown(e: unknown, callerSignal: AbortSignal | undefined): ApiErr {
   if (callerSignal?.aborted === true) {
@@ -90,9 +105,12 @@ function classifyThrown(e: unknown, callerSignal: AbortSignal | undefined): ApiE
   return makeErr(0, errMsg(e), "network");
 }
 
-/** Parse a non-2xx response body, lifting error / code / request_id fields. */
+/** Parse a non-2xx response body, lifting error / code / request_id fields.
+ *  `res.status` is coerced to a number: a custom `fetchFn` may return a truthy
+ *  non-Response whose `status` is undefined, and `ApiErr.status` is `number`. */
 async function parseErrorResponse(res: Response): Promise<ApiErr> {
-  let error = `HTTP ${res.status}`;
+  const status = typeof res.status === "number" ? res.status : 0;
+  let error = `HTTP ${status}`;
   let code: string | undefined;
   let requestId: string | undefined;
   try {
@@ -114,7 +132,7 @@ async function parseErrorResponse(res: Response): Promise<ApiErr> {
   } catch {
     // Non-JSON / empty error body — keep the `HTTP <status>` fallback.
   }
-  return makeErr(res.status, error, code, requestId);
+  return makeErr(status, error, code, requestId);
 }
 
 /**
@@ -131,11 +149,17 @@ export async function requestRaw<T>(
   const cfg = getFetchConfig();
   const callerSignal = opts?.signal;
 
+  // --- Build phase --------------------------------------------------------
+  // Header construction, JSON body encoding, the prepareHeaders hook, timeout
+  // composition, and url join. A throw here is a client-side "invalid" request
+  // (or "cancelled" if the caller already aborted) — it never hit the network.
+  const init: RequestInit = { method };
+  let url: string;
   try {
-    const init: RequestInit = { method };
-
     const headers = new Headers();
-    if (method !== "GET" && opts?.body !== undefined) {
+    // A null / undefined body means "no body": send neither payload nor a
+    // Content-Type (POSTing a literal JSON `null` is a non-need).
+    if (method !== "GET" && opts?.body != null) {
       headers.set("Content-Type", JSON_CT);
       init.body = JSON.stringify(opts.body);
     }
@@ -155,40 +179,56 @@ export async function requestRaw<T>(
     }
 
     init.signal = withTimeout(callerSignal, opts?.timeoutMs ?? API_TIMEOUT_MS);
+    url = joinUrl(cfg.baseUrl, path);
+  } catch (e) {
+    return classifyBuildError(e, callerSignal);
+  }
 
-    const url = joinUrl(cfg.baseUrl, path);
-    const fetchImpl = cfg.fetchFn ?? fetch;
+  // --- Fetch phase --------------------------------------------------------
+  // A throw here is a genuine network / timeout / cancellation failure.
+  const fetchImpl = cfg.fetchFn ?? fetch;
+  let res: Response;
+  try {
+    res = await fetchImpl(url, init);
+  } catch (e) {
+    return classifyThrown(e, callerSignal);
+  }
 
-    const res = await fetchImpl(url, init);
-
+  // --- Response phase -----------------------------------------------------
+  // Interpret the result. The outer try preserves the never-throw guarantee
+  // for a malformed result from a custom fetchFn (e.g. null) and for a mid-body
+  // read failure — both are network-class. A JSON.parse / decoder throw is a
+  // "decode" error, handled by its own inner try before it can reach here.
+  try {
     if (!res.ok) {
       return await parseErrorResponse(res);
     }
-    if (res.status === 204) {
-      return { ok: true, status: res.status, data: undefined as T };
+    const status = typeof res.status === "number" ? res.status : 0;
+    if (status === 204) {
+      return { ok: true, status, data: undefined as T };
     }
 
     const text = await res.text();
     if (text === "") {
-      return { ok: true, status: res.status, data: undefined as T };
+      return { ok: true, status, data: undefined as T };
     }
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch (e) {
-      return makeErr(res.status, `response not JSON: ${errMsg(e)}`, "decode");
+      return makeErr(status, `response not JSON: ${errMsg(e)}`, "decode");
     }
 
     if (opts?.decoder !== undefined) {
       try {
-        return { ok: true, status: res.status, data: opts.decoder(parsed) };
+        return { ok: true, status, data: opts.decoder(parsed) };
       } catch (e) {
-        return makeErr(res.status, `response shape mismatch: ${errMsg(e)}`, "decode");
+        return makeErr(status, `response shape mismatch: ${errMsg(e)}`, "decode");
       }
     }
 
-    return { ok: true, status: res.status, data: parsed as T };
+    return { ok: true, status, data: parsed as T };
   } catch (e) {
     return classifyThrown(e, callerSignal);
   }
@@ -205,5 +245,7 @@ export async function request<T>(
   opts?: RequestOptions<T>,
 ): Promise<T | null> {
   const result = await requestRaw<T>(method, path, opts);
-  return result.ok ? result.data : null;
+  // Collapse a truly-empty body (204 / empty ⇒ data === undefined) to null. A
+  // JSON `null` / `0` / `false` / `""` body is real data and passes through.
+  return result.ok && result.data !== undefined ? result.data : null;
 }

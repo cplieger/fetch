@@ -9,6 +9,9 @@ import {
   apiDelete,
   apiGetTyped,
   apiPostTyped,
+  apiPutTyped,
+  apiPatchTyped,
+  apiDeleteTyped,
   apiGetRaw,
   apiPostRaw,
   apiPutRaw,
@@ -64,11 +67,11 @@ describe("null-collapsing verb helpers", () => {
     }
   });
 
-  it("apiDelete issues a DELETE with no body", async () => {
+  it("apiDelete issues a DELETE with no body (204 collapses to null)", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
     configureFetch({ fetchFn });
     const data = await apiDelete("/x");
-    expect(data).toBeUndefined();
+    expect(data).toBeNull();
     expect(call(fetchFn)[1].method).toBe("DELETE");
     expect(call(fetchFn)[1].body).toBeUndefined();
   });
@@ -159,5 +162,69 @@ describe("envelope (*Raw) verb helpers", () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
     configureFetch({ fetchFn });
     expect(await apiDeleteRaw("/x")).toEqual({ ok: true, status: 204, data: undefined });
+  });
+});
+
+describe("null body + empty body helpers", () => {
+  it("apiPost with a null body sends no body / no Content-Type", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
+    configureFetch({ fetchFn });
+    await apiPost("/x", null);
+    const [, init] = call(fetchFn);
+    expect(init.body).toBeUndefined();
+    expect((init.headers as Headers).get("content-type")).toBeNull();
+  });
+
+  it("apiGetRaw surfaces an empty body as ok with undefined data", async () => {
+    const fetchFn = stubFetch(new Response("", { status: 200 }));
+    configureFetch({ fetchFn });
+    expect(await apiGetRaw("/x")).toEqual({ ok: true, status: 200, data: undefined });
+  });
+});
+
+describe("decoder-validated *Typed helpers (PUT / PATCH / DELETE)", () => {
+  const numDecoder: Decoder<{ n: number }> = (v) => {
+    if (typeof v !== "object" || v === null || typeof (v as { n: unknown }).n !== "number") {
+      throw new Error("bad shape");
+    }
+    return v as { n: number };
+  };
+  const throwingDecoder: Decoder<{ n: number }> = () => {
+    throw new Error("nope");
+  };
+
+  it("apiPutTyped / apiPatchTyped send the body, validate, and return data", async () => {
+    for (const [fn, method] of [
+      [apiPutTyped, "PUT"],
+      [apiPatchTyped, "PATCH"],
+    ] as const) {
+      const fetchFn = stubFetch(new Response(JSON.stringify({ n: 4 }), { status: 200 }));
+      configureFetch({ fetchFn });
+      const data = await fn("/x", { in: true }, numDecoder);
+      expect(data).toEqual({ n: 4 });
+      expect(call(fetchFn)[1].method).toBe(method);
+      expect(call(fetchFn)[1].body).toBe(JSON.stringify({ in: true }));
+    }
+  });
+
+  it("apiDeleteTyped validates and returns data", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify({ n: 7 }), { status: 200 }));
+    configureFetch({ fetchFn });
+    const data = await apiDeleteTyped("/x", numDecoder);
+    expect(data).toEqual({ n: 7 });
+    expect(call(fetchFn)[1].method).toBe("DELETE");
+  });
+
+  it("apiPutTyped / apiPatchTyped / apiDeleteTyped return null when the decoder throws", async () => {
+    const cases = [
+      () => apiPutTyped("/x", {}, throwingDecoder),
+      () => apiPatchTyped("/x", {}, throwingDecoder),
+      () => apiDeleteTyped("/x", throwingDecoder),
+    ];
+    for (const run of cases) {
+      const fetchFn = stubFetch(new Response(JSON.stringify({ wrong: 1 }), { status: 200 }));
+      configureFetch({ fetchFn });
+      expect(await run()).toBeNull();
+    }
   });
 });
