@@ -16,15 +16,25 @@ paired with a colocated `*.test.ts`:
 - `timeout.ts` — `withTimeout` (composes a caller signal with
   `AbortSignal.timeout` via `AbortSignal.any`) and the `API_TIMEOUT_MS`
   default.
-- `config.ts` — `configureFetch` / `resetFetchConfig` and the `FetchConfig`
-  shape. A module-global injection seam (baseUrl, credentials, a
-  `prepareHeaders` hook, a custom `fetchFn`) modelled on RTK's
-  `fetchBaseQuery`. `configureFetch` shallow-merges, so successive calls
-  accumulate.
-- `request.ts` — the core. `requestRaw` builds the request, runs the fetch, and
-  resolves to an `ApiResult`. `request` is the null-collapsing wrapper over it.
-- `verbs.ts` — thin per-verb helpers (`apiGet`, `apiGetRaw`, `apiGetTyped`, …)
-  over the core.
+- `config.ts` — `configureFetch` / `resetFetchConfig` / `getFetchConfig`, the
+  `FetchConfig` shape, and `createConfigStore` (the isolated config holder). A
+  module-global injection seam (baseUrl, credentials, a `prepareHeaders` hook,
+  a custom `fetchFn`) modelled on RTK's `fetchBaseQuery`; the default surface is
+  one `createConfigStore()` instance and `configureFetch` shallow-merges into
+  it, so successive calls accumulate.
+- `request.ts` — the core. `makeRequestRaw(getConfig)` builds a config-bound
+  `requestRaw` (builds the request, runs the fetch, resolves to an `ApiResult`);
+  `makeRequest` wraps it into the null-collapsing `request`. The exported
+  `requestRaw` / `request` are the default-instance bindings (bound to the
+  module-global config).
+- `verbs.ts` — `makeVerbs(request, requestRaw)` builds the 12 thin per-verb
+  helpers (`apiGet`, `apiGetRaw`, `apiGetTyped`, …) bound to a request pair; the
+  exported helpers are the default bindings.
+- `instance.ts` — `createFetch(initialConfig?)` composes an isolated
+  `createConfigStore` with `makeRequestRaw` / `makeRequest` / `makeVerbs` into a
+  `FetchInstance` (its own `requestRaw` / `request` / 12 verbs / `configure`), so
+  multiple origins / credential-sets can coexist without the module-global
+  default.
 
 The public API is whatever `src/index.ts` re-exports — that file is the
 contract. Update it deliberately, and keep the README `## API` section in sync.
@@ -49,6 +59,12 @@ contract. Update it deliberately, and keep the README `## API` section in sync.
   stays empty — everything is built on the platform `fetch` / `Headers` /
   `AbortSignal`. Decoder combinators and a retry/interceptor layer are
   [out of scope](README.md#unsupported-by-design); do not add them here.
+- **The default surface stays byte-compatible.** The top-level `apiGet` / … /
+  `configureFetch` (and the `@internal` `resetFetchConfig` / `getFetchConfig`)
+  delegate to a module-global default instance and must keep their exact
+  signatures and behavior. `createFetch` is additive **beside** them, never a
+  replacement; the existing default-surface tests pin this, so an instance
+  feature must not change how the default behaves.
 
 ## Public API surface
 

@@ -100,7 +100,29 @@ const res = await apiGetRaw("/slow", {
 
 > **Path contract:** `path` is expected to be a **relative** path. With `baseUrl` set, the configured scheme+host always precede it, so an absolute (`https://…`) or protocol-relative (`//host`) path is neutralised (kept as a path segment) and cannot override the origin. For this origin-override protection to hold, `baseUrl` must be an **absolute** URL (scheme + host); an empty or relative `baseUrl` does not neutralise a protocol-relative `path`. With `baseUrl` **unset**, `path` is passed to `fetch()` verbatim — the caller owns the full URL and must never pass untrusted input as the whole path.
 >
-> **Module-global config:** `baseUrl` and `credentials` are process-global (set once via `configureFetch`) and cannot vary per in-flight request. Only `prepareHeaders` runs per call, so per-tenant SSR that needs a different origin or credentials per request must handle that outside this layer (e.g. a request-scoped fetch instance).
+> **Module-global config vs isolated instances:** `configureFetch` sets a single process-global config, so on the default surface `baseUrl` and `credentials` cannot vary per in-flight request (only `prepareHeaders` runs per call). When multiple origins / credential-sets must coexist (per-tenant, multi-origin, SSR-per-request), build an isolated instance with [`createFetch`](#instance-factory) — each instance holds its own config and shares nothing with the default or with other instances.
+
+### Isolated instances
+
+For multiple origins or credential-sets in one app (per-tenant, multi-origin, SSR-per-request), `createFetch` builds an instance with its own config — independent of the module-global default and of every other instance:
+
+```typescript
+import { createFetch } from "@cplieger/fetch";
+
+const tenantA = createFetch({ baseUrl: "https://a.example.com", credentials: "include" });
+const tenantB = createFetch({ baseUrl: "https://b.example.com" });
+
+const [a, b] = await Promise.all([tenantA.apiGet<User>("/me"), tenantB.apiGet<User>("/me")]);
+
+// Adjust an instance later (shallow-merge, like configureFetch):
+tenantA.configure({
+  prepareHeaders: (headers) => {
+    headers.set("Authorization", `Bearer ${tokenA()}`);
+  },
+});
+```
+
+Each instance exposes the same surface as the default (`requestRaw`, `request`, and all twelve verb helpers), plus a per-instance `configure`.
 
 ## API
 
@@ -108,6 +130,11 @@ const res = await apiGetRaw("/slow", {
 
 - `configureFetch(config)` — shallow-merge into the global fetch layer (`baseUrl`, `credentials`, `prepareHeaders`, `fetchFn`). Call at boot; successive calls accumulate.
 - `FetchConfig` — the configuration shape.
+
+### Instance factory
+
+- `createFetch(initialConfig?)` — build an **isolated** fetch instance with its own config, so multiple origins / credential-sets / SSR-per-request configs coexist without touching the module-global default. Returns a `FetchInstance` exposing `requestRaw`, `request`, all twelve verb helpers, and `configure(config)` (a per-instance shallow-merge). Two instances share nothing.
+- `FetchInstance` — the isolated-instance shape.
 
 ### Request core
 
