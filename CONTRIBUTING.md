@@ -42,15 +42,19 @@ contract. Update it deliberately, and keep the README `## API` section in sync.
 ### Invariants (protect these)
 
 - **`requestRaw` never throws.** Every failure mode is a returned `ApiErr`,
-  never an exception: a thrown fetch error is classified (`cancelled` when the
-  caller signal is aborted, else `timeout` for a `TimeoutError` / `AbortError`,
-  else `network`), a non-2xx response becomes an `ApiErr` with the lifted
-  `error` / `code` / `request_id`, and a `JSON.parse` or decoder throw becomes
-  `code: "decode"`. `request` and the null-collapsing verb helpers derive from
+  never an exception: a build-phase throw (an un-encodable body, a bad header or
+  `timeoutMs`, a throwing `prepareHeaders`) becomes `code: "invalid"`; a thrown
+  fetch error is classified (`cancelled` when the caller signal is aborted, else
+  `timeout` for a `TimeoutError` / `AbortError`, else `network`); a non-2xx
+  response becomes an `ApiErr` with the lifted `error` / `code` / `request_id`;
+  and a `JSON.parse` or decoder throw becomes `code: "decode"`. `request` and
+  the null-collapsing verb helpers derive from
   this by returning `null` on any non-`ok` result. The tests pin every branch;
   do not let a refactor turn a returned error back into a throw.
-- **Status `0` means the network layer.** `network`, `timeout`, and `cancelled`
-  errors carry `status: 0`; a lifted server error carries the real HTTP status.
+- **Status `0` means a pre-response failure.** `network`, `timeout`,
+  `cancelled`, and the build-phase `invalid` errors all carry `status: 0`; a
+  lifted server error carries the real HTTP status, and a `decode` error carries
+  the real 2xx status.
 - **The relative-path contract.** With `baseUrl` set, the base scheme+host
   always precede `path` (one slash at the join, no origin override); with
   `baseUrl` unset, `path` is passed to `fetch()` verbatim. See the README path

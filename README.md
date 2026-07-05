@@ -98,7 +98,7 @@ const res = await apiGetRaw("/slow", {
 });
 ```
 
-> **Path contract:** `path` is expected to be a **relative** path. With `baseUrl` set, the configured scheme+host always precede it, so an absolute (`https://…`) or protocol-relative (`//host`) path is neutralised (kept as a path segment) and cannot override the origin. For this origin-override protection to hold, `baseUrl` must be an **absolute** URL (scheme + host); an empty or relative `baseUrl` does not neutralise a protocol-relative `path`. With `baseUrl` **unset**, `path` is passed to `fetch()` verbatim — the caller owns the full URL and must never pass untrusted input as the whole path.
+> **Path contract:** `path` is expected to be a **relative** path. With `baseUrl` set, the configured scheme+host always precede it, so an absolute (`https://…`) or protocol-relative (`//host`) path is neutralised (kept as a path segment) and cannot override the origin. A relative `path` also cannot escape the configured base path via `..` / dot-segment or backslash navigation — those are percent-encoded so the base path prefix always stands, while the query string and fragment are preserved verbatim. For this origin-override protection to hold, `baseUrl` must be an **absolute** URL (scheme + host); an empty or relative `baseUrl` does not neutralise a protocol-relative `path`. With `baseUrl` **unset**, `path` is passed to `fetch()` verbatim — the caller owns the full URL and must never pass untrusted input as the whole path.
 >
 > **Module-global config vs isolated instances:** `configureFetch` sets a single process-global config, so on the default surface `baseUrl` and `credentials` cannot vary per in-flight request (only `prepareHeaders` runs per call). When multiple origins / credential-sets must coexist (per-tenant, multi-origin, SSR-per-request), build an isolated instance with [`createFetch`](#instance-factory) — each instance holds its own config and shares nothing with the default or with other instances.
 
@@ -128,8 +128,10 @@ Each instance exposes the same surface as the default (`requestRaw`, `request`, 
 
 ### Configuration
 
-- `configureFetch(config)` — shallow-merge into the global fetch layer (`baseUrl`, `credentials`, `prepareHeaders`, `fetchFn`). Call at boot; successive calls accumulate.
+- `configureFetch(config)` — shallow-merge into the global fetch layer (`baseUrl`, `credentials`, `prepareHeaders`, `fetchFn`, `maxResponseBytes`). Call at boot; successive calls accumulate.
 - `FetchConfig` — the configuration shape.
+
+> `maxResponseBytes` is an opt-in cap on the response body size (unset = unlimited, the default). When set, a response whose `content-length` exceeds it — or whose streamed body grows past it — is rejected rather than buffered, a defense-in-depth guard against a hostile upstream (e.g. the SSR / Node path). An over-cap 2xx body surfaces as `code: "network"` (status 0); an over-cap error body falls back to the `HTTP <status>` message.
 
 ### Instance factory
 

@@ -30,7 +30,7 @@ export interface ApiOk<T> {
 /** Failure result envelope. Never thrown — always returned by `requestRaw`. */
 export interface ApiErr {
   readonly ok: false;
-  /** HTTP status, or 0 for a network / timeout / cancelled failure. */
+  /** HTTP status, or 0 for a network / timeout / cancelled / invalid failure. */
   readonly status: number;
   /** Human-readable message. */
   readonly error: string;
@@ -38,7 +38,16 @@ export interface ApiErr {
    *  `"invalid"`, or a server-supplied code lifted from the error body.
    *  `"invalid"` marks a client-side build failure (an un-encodable body, a bad
    *  header name/value, a bad `timeoutMs`, or a throwing `prepareHeaders`) that
-   *  never reached the network. */
+   *  never reached the network.
+   *
+   *  This field is dual-purpose: a server-controlled body value shares the
+   *  namespace with the library's own control codes, so a compromised or
+   *  malicious upstream can spoof a reserved value. Disambiguate by `status`,
+   *  never by `code` alone: the reserved library codes carry `status === 0`
+   *  (except `"decode"`, which carries the real 2xx status), whereas a lifted
+   *  server-supplied code always carries the real non-2xx HTTP status. A
+   *  consumer branching on a reserved code (e.g. `r.code === "cancelled"`) MUST
+   *  also check `status` to avoid misclassifying a server error. */
   readonly code?: string;
   /** Lifted from the error body's `request_id` / `requestId`, when present. */
   readonly requestId?: string;

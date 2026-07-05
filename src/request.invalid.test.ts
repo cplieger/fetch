@@ -60,4 +60,20 @@ describe("requestRaw — client-side 'invalid' classification (never throws)", (
     expect(r).toMatchObject({ ok: false, status: 0, code: "cancelled" });
     expect(fetchFn).not.toHaveBeenCalled();
   });
+
+  it("classifies a symbol body (JSON.stringify → undefined) as invalid, without fetching", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ fetchFn });
+    const r = await requestRaw("POST", "/x", { body: Symbol("x") });
+    expect(r).toMatchObject({ ok: false, status: 0, code: "invalid" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("classifies a function body (JSON.stringify → undefined) as invalid, without fetching", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ fetchFn });
+    const r = await requestRaw("POST", "/x", { body: () => 1 });
+    expect(r).toMatchObject({ ok: false, status: 0, code: "invalid" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
 });
