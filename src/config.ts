@@ -29,6 +29,11 @@ export interface FetchConfig {
    *  otherwise the mutated instance is used). May be async (e.g. to read a
    *  token store). */
   prepareHeaders?: (headers: Headers) => Headers | undefined | Promise<Headers | undefined>;
+  /** Optional cap on the response body size in bytes. Unset means unlimited
+   *  (the current behavior). When set, a larger body is rejected instead of
+   *  buffered; a defense-in-depth guard for the SSR/Node path against a
+   *  hostile upstream. */
+  maxResponseBytes?: number;
 }
 
 /**

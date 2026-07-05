@@ -54,18 +54,61 @@ function makeErr(status: number, error: string, code?: string, requestId?: strin
   return err;
 }
 
+/** Coerce a possibly-non-numeric status (a custom fetchFn may return a
+ *  malformed object) to a number, defaulting to 0. */
+function statusOf(res: Response): number {
+  return typeof res.status === "number" ? res.status : 0;
+}
+
+/**
+ * Neutralize a relative path's parser-significant navigation syntax before it
+ * is concatenated onto a base URL, so a crafted path cannot escape the base
+ * path prefix via URL normalization. A leading slash is ensured, backslashes
+ * (special-scheme URL parsing treats `\` as `/`) are percent-encoded, and any
+ * dot-segment — `.` / `..` and the percent-encoded equivalents (`%2e`,
+ * `%2e%2e`, `.%2e`, …) the WHATWG URL parser would otherwise pop — is
+ * double-encoded so it survives normalization as opaque path data. The dots
+ * become `%252E`, not `%2E`, on purpose: `%2E`/`%2e` is still recognized as a
+ * dot octet and would be popped.
+ */
+function safeSuffix(path: string): string {
+  // Isolate the query (`?`) / fragment (`#`) before segment processing: the
+  // URL parser does not path-normalize them and they must reach the server
+  // verbatim. Folding them into the path both missed a `..`/`.` adjacent to
+  // `?`/`#` (a live navigation operator that escaped the base path prefix) and
+  // double-encoded dot-segments inside query values, corrupting them.
+  const marks = [path.indexOf("?"), path.indexOf("#")].filter((i) => i !== -1);
+  const sep = marks.length > 0 ? Math.min(...marks) : -1;
+  const pathPart = sep === -1 ? path : path.slice(0, sep);
+  const rest = sep === -1 ? "" : path.slice(sep);
+  const raw = pathPart.startsWith("/") ? pathPart : `/${pathPart}`;
+  const encoded = raw
+    .replace(/\\/g, "%5C")
+    .split("/")
+    .map((segment) => {
+      const dotLike = segment.replace(/%2e/gi, ".");
+      if (dotLike === "." || dotLike === "..") {
+        return segment.replace(/\./g, "%2E").replace(/%/g, "%25");
+      }
+      return segment;
+    })
+    .join("/");
+  return encoded + rest;
+}
+
 /**
  * Join a base URL with a relative path per the relative-path contract:
- * strip a trailing slash from the base, ensure a single leading slash on the
- * path. With no base, the path is returned verbatim.
+ * strip a trailing slash from the base, then append the path via
+ * {@link safeSuffix}, which ensures a single leading slash and preserves the
+ * base path prefix against dot-segment / backslash navigation. With no base,
+ * the path is returned verbatim.
  */
 function joinUrl(baseUrl: string | undefined, path: string): string {
   if (baseUrl === undefined) {
     return path;
   }
   const base = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
-  const suffix = path.startsWith("/") ? path : `/${path}`;
-  return `${base}${suffix}`;
+  return `${base}${safeSuffix(path)}`;
 }
 
 /** Merge caller-supplied headers (object or Headers) into the target. */
@@ -84,6 +127,12 @@ function mergeHeaders(target: Headers, source: Record<string, string> | Headers 
   }
 }
 
+/** The caller-aborted-wins envelope shared by both classifiers, so the
+ *  cancelled status/message/code stay defined in exactly one place. */
+function cancelledErr(): ApiErr {
+  return makeErr(0, "request cancelled", "cancelled");
+}
+
 /**
  * Classify a throw from the BUILD phase (header construction, JSON body
  * encoding, the `prepareHeaders` hook, timeout composition, url join) into an
@@ -93,7 +142,7 @@ function mergeHeaders(target: Headers, source: Record<string, string> | Headers 
  */
 function classifyBuildError(e: unknown, callerSignal: AbortSignal | undefined): ApiErr {
   if (callerSignal?.aborted === true) {
-    return makeErr(0, "request cancelled", "cancelled");
+    return cancelledErr();
   }
   return makeErr(0, errMsg(e), "invalid");
 }
@@ -108,7 +157,7 @@ function classifyBuildError(e: unknown, callerSignal: AbortSignal | undefined): 
  */
 function classifyThrown(e: unknown, callerSignal: AbortSignal | undefined): ApiErr {
   if (callerSignal?.aborted === true) {
-    return makeErr(0, "request cancelled", "cancelled");
+    return cancelledErr();
   }
   if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
     return makeErr(0, e.message, "timeout");
@@ -116,16 +165,58 @@ function classifyThrown(e: unknown, callerSignal: AbortSignal | undefined): ApiE
   return makeErr(0, errMsg(e), "network");
 }
 
+/** Read a response body as text, optionally bounded to `max` bytes. When `max`
+ *  is undefined the read is unbounded (byte-identical to `res.text()`, the
+ *  default). When set, a `content-length` over the cap is rejected up front and
+ *  the streamed body is aborted the moment it exceeds the cap, so an untrusted
+ *  upstream (the documented SSR/Node path) cannot force unbounded buffering. */
+async function readBounded(res: Response, max: number | undefined): Promise<string> {
+  if (max === undefined) {
+    return res.text();
+  }
+  const contentLength = res.headers.get("content-length");
+  if (contentLength !== null && Number(contentLength) > max) {
+    throw new Error(`response exceeds ${max} bytes`);
+  }
+  const body = res.body;
+  if (body === null) {
+    return res.text();
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const result = await reader.read();
+    if (result.done) {
+      break;
+    }
+    total += result.value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      throw new Error(`response exceeds ${max} bytes`);
+    }
+    chunks.push(result.value);
+  }
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(combined);
+}
+
 /** Parse a non-2xx response body, lifting error / code / request_id fields.
  *  `res.status` is coerced to a number: a custom `fetchFn` may return a truthy
- *  non-Response whose `status` is undefined, and `ApiErr.status` is `number`. */
-async function parseErrorResponse(res: Response): Promise<ApiErr> {
-  const status = typeof res.status === "number" ? res.status : 0;
+ *  non-Response whose `status` is undefined, and `ApiErr.status` is `number`.
+ *  `max` bounds the body read (see {@link readBounded}); undefined = unbounded. */
+async function parseErrorResponse(res: Response, max: number | undefined): Promise<ApiErr> {
+  const status = statusOf(res);
   let error = `HTTP ${status}`;
   let code: string | undefined;
   let requestId: string | undefined;
   try {
-    const body: unknown = await res.json();
+    const body: unknown = JSON.parse(await readBounded(res, max));
     if (isRecord(body)) {
       const errField = body["error"];
       if (typeof errField === "string") {
@@ -172,8 +263,12 @@ export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
       // A null / undefined body means "no body": send neither payload nor a
       // Content-Type (POSTing a literal JSON `null` is a non-need).
       if (method !== "GET" && opts?.body != null) {
+        const encoded = JSON.stringify(opts.body) as string | undefined;
+        if (encoded === undefined) {
+          throw new TypeError("request body is not JSON-encodable");
+        }
         headers.set("Content-Type", JSON_CT);
-        init.body = JSON.stringify(opts.body);
+        init.body = encoded;
       }
       mergeHeaders(headers, opts?.headers);
 
@@ -198,9 +293,9 @@ export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
 
     // --- Fetch phase ------------------------------------------------------
     // A throw here is a genuine network / timeout / cancellation failure.
-    const fetchImpl = cfg.fetchFn ?? fetch;
     let res: Response;
     try {
+      const fetchImpl = cfg.fetchFn ?? fetch;
       res = await fetchImpl(url, init);
     } catch (e) {
       return classifyThrown(e, callerSignal);
@@ -214,14 +309,14 @@ export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
     // reach here.
     try {
       if (!res.ok) {
-        return await parseErrorResponse(res);
+        return await parseErrorResponse(res, cfg.maxResponseBytes);
       }
-      const status = typeof res.status === "number" ? res.status : 0;
+      const status = statusOf(res);
       if (status === 204) {
         return { ok: true, status, data: undefined as T };
       }
 
-      const text = await res.text();
+      const text = await readBounded(res, cfg.maxResponseBytes);
       if (text === "") {
         return { ok: true, status, data: undefined as T };
       }

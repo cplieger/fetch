@@ -57,4 +57,85 @@ describe("baseUrl + path joining (property)", () => {
       { numRuns: 100 },
     );
   });
+
+  it("preserves the configured origin for any path (origin-override oracle)", async () => {
+    const evilPrefix = fc.constantFrom(
+      "",
+      "/",
+      "//",
+      "///",
+      "https://evil.com",
+      "//evil.com",
+      "/\\/evil.com",
+      "\\\\evil.com",
+      "@evil.com",
+      ":@evil.com/x",
+      "http:evil.com",
+    );
+    await fc.assert(
+      fc.asyncProperty(
+        evilPrefix,
+        fc.array(segment, { minLength: 1, maxLength: 4 }),
+        async (prefix, segs) => {
+          const path = `${prefix}/${segs.join("/")}`;
+          resetFetchConfig();
+          const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+          configureFetch({ baseUrl: ORIGIN, fetchFn });
+          await requestRaw("GET", path);
+          const url = fetchFn.mock.calls[0]![0] as string;
+          // A crafted path can never override the configured origin.
+          expect(new URL(url).origin).toBe(ORIGIN);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("keeps a crafted dot-segment / backslash path inside the configured base path", async () => {
+    const BASE = `${ORIGIN}/v1`;
+    const adversarial = [
+      "/../admin",
+      "/%2e%2e/admin",
+      "/.%2e/admin",
+      "/..\\admin",
+      // A `..` / `.` fused to a trailing `?`/`#` with no intervening `/` is
+      // still a live navigation operator during URL normalization, so it must
+      // be neutralized like any other dot-segment (h-f1: the cycle-2 guard
+      // split on `/` only and missed these, letting them escape the base path).
+      "/..?x=1",
+      "/foo/..?x=1",
+      "/..#frag",
+    ];
+    for (const path of adversarial) {
+      resetFetchConfig();
+      const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+      configureFetch({ baseUrl: BASE, fetchFn });
+      await requestRaw("GET", path);
+      const url = fetchFn.mock.calls[0]![0] as string;
+      const parsed = new URL(url);
+      // Cannot escape the origin ...
+      expect(parsed.origin).toBe(ORIGIN);
+      // ... nor the /v1 base path prefix after URL normalization.
+      expect(parsed.pathname.startsWith("/v1/")).toBe(true);
+    }
+  });
+
+  it("preserves a path-valued query / fragment verbatim (never dot-neutralizes it)", async () => {
+    const BASE = `${ORIGIN}/v1`;
+    const cases: [string, string][] = [
+      ["/search?redirect=/..", `${BASE}/search?redirect=/..`],
+      ["/x?q=foo/../bar", `${BASE}/x?q=foo/../bar`],
+      ["/page#/../frag", `${BASE}/page#/../frag`],
+    ];
+    for (const [path, expected] of cases) {
+      resetFetchConfig();
+      const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+      configureFetch({ baseUrl: BASE, fetchFn });
+      await requestRaw("GET", path);
+      const url = fetchFn.mock.calls[0]![0] as string;
+      // Dot-segment neutralization is PATH-only: the query / fragment reaches
+      // the server byte-for-byte, so path-valued query data is not mangled.
+      expect(url).toBe(expected);
+    }
+  });
 });

@@ -29,4 +29,19 @@ describe("withTimeout", () => {
     const composed = withTimeout(ac.signal, 60_000);
     expect(composed.aborted).toBe(true);
   });
+
+  it("drops the caller signal but keeps the timeout when AbortSignal.any is unavailable", () => {
+    const orig = AbortSignal.any;
+    (AbortSignal as { any?: unknown }).any = undefined;
+    try {
+      const ac = new AbortController();
+      const composed = withTimeout(ac.signal, 60_000);
+      expect(composed).toBeInstanceOf(AbortSignal);
+      expect(composed.aborted).toBe(false);
+      ac.abort();
+      expect(composed.aborted).toBe(false);
+    } finally {
+      (AbortSignal as { any?: unknown }).any = orig;
+    }
+  });
 });

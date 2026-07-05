@@ -151,6 +151,17 @@ describe("requestRaw — non-2xx responses", () => {
     const r = await requestRaw("GET", "/x");
     expect(r).toEqual({ ok: false, status: 400, error: "HTTP 400" });
   });
+
+  it("prefers snake_case request_id over camelCase requestId when both are present", async () => {
+    const fetchFn = stubFetch(
+      new Response(JSON.stringify({ error: "boom", request_id: "snake-1", requestId: "camel-2" }), {
+        status: 500,
+      }),
+    );
+    configureFetch({ fetchFn });
+    const r = await requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 500, error: "boom", requestId: "snake-1" });
+  });
 });
 
 describe("requestRaw — decoding", () => {
@@ -319,6 +330,19 @@ describe("request — null collapsing", () => {
       expect(r).toEqual({ ok: true, status: 200, data: JSON.parse(raw) as unknown });
     }
   });
+
+  it("passes a falsy JSON body (0 / false / '') through request(), not collapsed to null", async () => {
+    for (const [raw, want] of [
+      ["0", 0],
+      ["false", false],
+      ['""', ""],
+    ] as const) {
+      const fetchFn = stubFetch(new Response(raw, { status: 200 }));
+      configureFetch({ fetchFn });
+      const data = await request<number | boolean | string>("GET", "/x");
+      expect(data).toBe(want);
+    }
+  });
 });
 
 describe("request — global fetch fallback", () => {
@@ -375,5 +399,67 @@ describe("requestRaw — caller signal + timeout composition", () => {
     const [, init] = callArgs(fetchFn);
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(init.signal).not.toBe(ac.signal);
+  });
+});
+
+describe("requestRaw — maxResponseBytes", () => {
+  it("rejects a 2xx response when content-length exceeds the configured cap", async () => {
+    const fetchFn = stubFetch(
+      new Response(JSON.stringify({ a: 1 }), {
+        status: 200,
+        headers: { "content-length": "7" },
+      }),
+    );
+    configureFetch({ fetchFn, maxResponseBytes: 3 });
+    const r = await requestRaw("GET", "/x");
+    expect(r).toEqual({
+      ok: false,
+      status: 0,
+      code: "network",
+      error: "response exceeds 3 bytes",
+    });
+  });
+
+  it("rejects a streaming 2xx response as soon as it crosses the cap", async () => {
+    const encoder = new TextEncoder();
+    const chunks = [encoder.encode('{"a":'), encoder.encode("1}")];
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const chunk = chunks.shift();
+        if (chunk === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+    const fetchFn = stubFetch(new Response(body, { status: 200 }));
+    configureFetch({ fetchFn, maxResponseBytes: 5 });
+    const r = await requestRaw("GET", "/x");
+    expect(r).toEqual({
+      ok: false,
+      status: 0,
+      code: "network",
+      error: "response exceeds 5 bytes",
+    });
+  });
+
+  it("parses a response that stays within the configured cap", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    configureFetch({ fetchFn, maxResponseBytes: 20 });
+    const r = await requestRaw<{ ok: boolean }>("GET", "/x");
+    expect(r).toEqual({ ok: true, status: 200, data: { ok: true } });
+  });
+
+  it("bounds non-2xx error bodies before lifting fields", async () => {
+    const fetchFn = stubFetch(
+      new Response(JSON.stringify({ error: "too large", code: "large" }), {
+        status: 413,
+        headers: { "content-length": "36" },
+      }),
+    );
+    configureFetch({ fetchFn, maxResponseBytes: 8 });
+    const r = await requestRaw("GET", "/x");
+    expect(r).toEqual({ ok: false, status: 413, error: "HTTP 413" });
   });
 });
