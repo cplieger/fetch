@@ -60,3 +60,20 @@ export interface RequestOptions<T = unknown> {
   /** Overrides the default request timeout (`API_TIMEOUT_MS`) for this request. */
   timeoutMs?: number;
 }
+
+/** The non-throwing request core signature: always resolves to an
+ *  {@link ApiResult}, never throws. Shared by the default instance and every
+ *  {@link createFetch} instance. */
+export type RequestRawFn = <T>(
+  method: HttpMethod,
+  path: string,
+  opts?: RequestOptions<T>,
+) => Promise<ApiResult<T>>;
+
+/** The null-collapsing request signature: the decoded body, or `null` on any
+ *  error / empty body. */
+export type RequestFn = <T>(
+  method: HttpMethod,
+  path: string,
+  opts?: RequestOptions<T>,
+) => Promise<T | null>;

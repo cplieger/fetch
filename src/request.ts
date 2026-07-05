@@ -1,12 +1,23 @@
 // The non-throwing core. requestRaw builds the request, performs the fetch via
-// the configured layer, and ALWAYS resolves to an ApiResult<T> — every failure
-// mode (invalid, network, timeout, cancellation, non-2xx, decode) is returned,
-// never thrown. request() is the thin null-collapsing wrapper over it.
+// the resolved config layer, and ALWAYS resolves to an ApiResult<T> — every
+// failure mode (invalid, network, timeout, cancellation, non-2xx, decode) is
+// returned, never thrown. request() is the thin null-collapsing wrapper over
+// it. makeRequestRaw/makeRequest bind a config source (the module-global
+// default, or a per-instance store from createFetch); the exported requestRaw/
+// request are the default-instance bindings.
 // ---------------------------------------------------------------------------
 
 import { getFetchConfig } from "./config.js";
+import type { FetchConfig } from "./config.js";
 import { API_TIMEOUT_MS, withTimeout } from "./timeout.js";
-import type { ApiErr, ApiResult, HttpMethod, RequestOptions } from "./types.js";
+import type {
+  ApiErr,
+  ApiResult,
+  HttpMethod,
+  RequestFn,
+  RequestOptions,
+  RequestRawFn,
+} from "./types.js";
 
 const JSON_CT = "application/json";
 
@@ -136,116 +147,131 @@ async function parseErrorResponse(res: Response): Promise<ApiErr> {
 }
 
 /**
- * The non-throwing request core. Builds headers (JSON-encoding the body for
- * non-GET requests), runs the global `prepareHeaders` hook, composes the
- * timeout signal, resolves the URL, performs the fetch, and returns an
- * {@link ApiResult}. Never throws — every failure is a returned {@link ApiErr}.
+ * Build the non-throwing request core bound to a config source. `getConfig` is
+ * called at the START of every request, so a `configure`/`configureFetch` that
+ * runs after the instance is created is reflected on the next call.
  */
-export async function requestRaw<T>(
-  method: HttpMethod,
-  path: string,
-  opts?: RequestOptions<T>,
-): Promise<ApiResult<T>> {
-  const cfg = getFetchConfig();
-  const callerSignal = opts?.signal;
+export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
+  return async function requestRaw<T>(
+    method: HttpMethod,
+    path: string,
+    opts?: RequestOptions<T>,
+  ): Promise<ApiResult<T>> {
+    const cfg = getConfig();
+    const callerSignal = opts?.signal;
 
-  // --- Build phase --------------------------------------------------------
-  // Header construction, JSON body encoding, the prepareHeaders hook, timeout
-  // composition, and url join. A throw here is a client-side "invalid" request
-  // (or "cancelled" if the caller already aborted) — it never hit the network.
-  const init: RequestInit = { method };
-  let url: string;
-  try {
-    const headers = new Headers();
-    // A null / undefined body means "no body": send neither payload nor a
-    // Content-Type (POSTing a literal JSON `null` is a non-need).
-    if (method !== "GET" && opts?.body != null) {
-      headers.set("Content-Type", JSON_CT);
-      init.body = JSON.stringify(opts.body);
-    }
-    mergeHeaders(headers, opts?.headers);
-
-    let effectiveHeaders = headers;
-    if (cfg.prepareHeaders !== undefined) {
-      const prepared = await cfg.prepareHeaders(headers);
-      if (prepared !== undefined) {
-        effectiveHeaders = prepared;
-      }
-    }
-    init.headers = effectiveHeaders;
-
-    if (cfg.credentials !== undefined) {
-      init.credentials = cfg.credentials;
-    }
-
-    init.signal = withTimeout(callerSignal, opts?.timeoutMs ?? API_TIMEOUT_MS);
-    url = joinUrl(cfg.baseUrl, path);
-  } catch (e) {
-    return classifyBuildError(e, callerSignal);
-  }
-
-  // --- Fetch phase --------------------------------------------------------
-  // A throw here is a genuine network / timeout / cancellation failure.
-  const fetchImpl = cfg.fetchFn ?? fetch;
-  let res: Response;
-  try {
-    res = await fetchImpl(url, init);
-  } catch (e) {
-    return classifyThrown(e, callerSignal);
-  }
-
-  // --- Response phase -----------------------------------------------------
-  // Interpret the result. The outer try preserves the never-throw guarantee
-  // for a malformed result from a custom fetchFn (e.g. null) and for a mid-body
-  // read failure — both are network-class. A JSON.parse / decoder throw is a
-  // "decode" error, handled by its own inner try before it can reach here.
-  try {
-    if (!res.ok) {
-      return await parseErrorResponse(res);
-    }
-    const status = typeof res.status === "number" ? res.status : 0;
-    if (status === 204) {
-      return { ok: true, status, data: undefined as T };
-    }
-
-    const text = await res.text();
-    if (text === "") {
-      return { ok: true, status, data: undefined as T };
-    }
-
-    let parsed: unknown;
+    // --- Build phase ------------------------------------------------------
+    // Header construction, JSON body encoding, the prepareHeaders hook, timeout
+    // composition, and url join. A throw here is a client-side "invalid"
+    // request (or "cancelled" if the caller already aborted) — never hit the
+    // network.
+    const init: RequestInit = { method };
+    let url: string;
     try {
-      parsed = JSON.parse(text);
-    } catch (e) {
-      return makeErr(status, `response not JSON: ${errMsg(e)}`, "decode");
-    }
-
-    if (opts?.decoder !== undefined) {
-      try {
-        return { ok: true, status, data: opts.decoder(parsed) };
-      } catch (e) {
-        return makeErr(status, `response shape mismatch: ${errMsg(e)}`, "decode");
+      const headers = new Headers();
+      // A null / undefined body means "no body": send neither payload nor a
+      // Content-Type (POSTing a literal JSON `null` is a non-need).
+      if (method !== "GET" && opts?.body != null) {
+        headers.set("Content-Type", JSON_CT);
+        init.body = JSON.stringify(opts.body);
       }
+      mergeHeaders(headers, opts?.headers);
+
+      let effectiveHeaders = headers;
+      if (cfg.prepareHeaders !== undefined) {
+        const prepared = await cfg.prepareHeaders(headers);
+        if (prepared !== undefined) {
+          effectiveHeaders = prepared;
+        }
+      }
+      init.headers = effectiveHeaders;
+
+      if (cfg.credentials !== undefined) {
+        init.credentials = cfg.credentials;
+      }
+
+      init.signal = withTimeout(callerSignal, opts?.timeoutMs ?? API_TIMEOUT_MS);
+      url = joinUrl(cfg.baseUrl, path);
+    } catch (e) {
+      return classifyBuildError(e, callerSignal);
     }
 
-    return { ok: true, status, data: parsed as T };
-  } catch (e) {
-    return classifyThrown(e, callerSignal);
-  }
+    // --- Fetch phase ------------------------------------------------------
+    // A throw here is a genuine network / timeout / cancellation failure.
+    const fetchImpl = cfg.fetchFn ?? fetch;
+    let res: Response;
+    try {
+      res = await fetchImpl(url, init);
+    } catch (e) {
+      return classifyThrown(e, callerSignal);
+    }
+
+    // --- Response phase ---------------------------------------------------
+    // Interpret the result. The outer try preserves the never-throw guarantee
+    // for a malformed result from a custom fetchFn (e.g. null) and for a
+    // mid-body read failure — both are network-class. A JSON.parse / decoder
+    // throw is a "decode" error, handled by its own inner try before it can
+    // reach here.
+    try {
+      if (!res.ok) {
+        return await parseErrorResponse(res);
+      }
+      const status = typeof res.status === "number" ? res.status : 0;
+      if (status === 204) {
+        return { ok: true, status, data: undefined as T };
+      }
+
+      const text = await res.text();
+      if (text === "") {
+        return { ok: true, status, data: undefined as T };
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch (e) {
+        return makeErr(status, `response not JSON: ${errMsg(e)}`, "decode");
+      }
+
+      if (opts?.decoder !== undefined) {
+        try {
+          return { ok: true, status, data: opts.decoder(parsed) };
+        } catch (e) {
+          return makeErr(status, `response shape mismatch: ${errMsg(e)}`, "decode");
+        }
+      }
+
+      return { ok: true, status, data: parsed as T };
+    } catch (e) {
+      return classifyThrown(e, callerSignal);
+    }
+  };
 }
 
 /**
- * Convenience wrapper over {@link requestRaw}: returns the decoded data on a
- * successful result, or `null` on any error. Prefer {@link requestRaw} when you
- * need the status code or error details.
+ * Build a null-collapsing `request` over a `requestRaw`: the decoded data on a
+ * successful result, or `null` on any error. Prefer the raw form when you need
+ * the status code or error details.
  */
-export async function request<T>(
-  method: HttpMethod,
-  path: string,
-  opts?: RequestOptions<T>,
-): Promise<T | null> {
-  const result = await requestRaw<T>(method, path, opts);
-  // Collapse a truly-empty body (204 / empty ⇒ data === undefined) to null. A
-  // JSON `null` / `0` / `false` / `""` body is real data and passes through.
-  return result.ok && result.data !== undefined ? result.data : null;
+export function makeRequest(raw: RequestRawFn): RequestFn {
+  return async function request<T>(
+    method: HttpMethod,
+    path: string,
+    opts?: RequestOptions<T>,
+  ): Promise<T | null> {
+    const result = await raw<T>(method, path, opts);
+    // Collapse a truly-empty body (204 / empty ⇒ data === undefined) to null. A
+    // JSON `null` / `0` / `false` / `""` body is real data and passes through.
+    return result.ok && result.data !== undefined ? result.data : null;
+  };
 }
+
+// --- Default instance (bound to the module-global config store) ------------
+// The byte-compatible existing surface: these read the config that
+// configureFetch / resetFetchConfig mutate.
+
+/** The default-instance non-throwing request core. See {@link makeRequestRaw}. */
+export const requestRaw: RequestRawFn = makeRequestRaw(getFetchConfig);
+
+/** The default-instance null-collapsing request. See {@link makeRequest}. */
+export const request: RequestFn = makeRequest(requestRaw);
