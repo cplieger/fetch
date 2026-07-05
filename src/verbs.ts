@@ -93,19 +93,20 @@ export function makeVerbs(request: RequestFn, requestRaw: RequestRawFn): FetchVe
 }
 
 // --- Default instance verb helpers (bound to the module-global default) ----
-const defaultVerbs = makeVerbs(defaultRequest, defaultRequestRaw);
+const defaultVerbs: FetchVerbs = makeVerbs(defaultRequest, defaultRequestRaw);
 
-export const {
-  apiGet,
-  apiPost,
-  apiPut,
-  apiPatch,
-  apiDelete,
-  apiGetTyped,
-  apiPostTyped,
-  apiGetRaw,
-  apiPostRaw,
-  apiPutRaw,
-  apiPatchRaw,
-  apiDeleteRaw,
-} = defaultVerbs;
+// Individual typed re-exports (not `export const { … } = defaultVerbs`): JSR's
+// no-slow-types check rejects a destructuring export and requires each public
+// symbol to carry an explicit type. Same runtime bindings, explicit types.
+export const apiGet: FetchVerbs["apiGet"] = defaultVerbs.apiGet;
+export const apiPost: FetchVerbs["apiPost"] = defaultVerbs.apiPost;
+export const apiPut: FetchVerbs["apiPut"] = defaultVerbs.apiPut;
+export const apiPatch: FetchVerbs["apiPatch"] = defaultVerbs.apiPatch;
+export const apiDelete: FetchVerbs["apiDelete"] = defaultVerbs.apiDelete;
+export const apiGetTyped: FetchVerbs["apiGetTyped"] = defaultVerbs.apiGetTyped;
+export const apiPostTyped: FetchVerbs["apiPostTyped"] = defaultVerbs.apiPostTyped;
+export const apiGetRaw: FetchVerbs["apiGetRaw"] = defaultVerbs.apiGetRaw;
+export const apiPostRaw: FetchVerbs["apiPostRaw"] = defaultVerbs.apiPostRaw;
+export const apiPutRaw: FetchVerbs["apiPutRaw"] = defaultVerbs.apiPutRaw;
+export const apiPatchRaw: FetchVerbs["apiPatchRaw"] = defaultVerbs.apiPatchRaw;
+export const apiDeleteRaw: FetchVerbs["apiDeleteRaw"] = defaultVerbs.apiDeleteRaw;
