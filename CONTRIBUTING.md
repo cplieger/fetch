@@ -83,19 +83,21 @@ Install dev dependencies, then run the checks (scripts are in `package.json`):
 
 ```sh
 npm install
-npm run typecheck         # tsgo -project tsconfig.json (source)
-npm run typecheck:tests   # tsgo -project tsconfig.test.json (incl. tests)
+npm run typecheck         # tsc -project tsconfig.json (source)
+npm run typecheck:tests   # tsc -project tsconfig.test.json (incl. tests)
 npm test                  # vitest --run
 npx eslint .              # strict typed lint (eslint.config.mjs)
 npx prettier --check .    # formatting (printWidth 100)
 ```
 
-The `typecheck` scripts run `tsgo` (the TypeScript 7 native compiler), which is
-not a package dependency: install it once (`npm i -g @typescript/native-preview`)
-or substitute `npx tsc -p tsconfig.json` locally (the transitive `typescript`
-provides `tsc`; `tsgo` is the source of truth that CI runs). There is no build
-step — the package ships TypeScript source directly (both npm and JSR reference
-`src/**/*.ts`), so consumers compile it through their own bundler.
+The `typecheck` scripts run `tsc`, the TypeScript 7 native compiler. It comes
+from the `@typescript/native` devDependency (an npm alias for `typescript@7`),
+which `npm install` places at `node_modules/.bin/tsc` — no separate install
+step. (The `typescript` devDependency is aliased to `@typescript/typescript6`,
+the TS 6.x API `typescript-eslint` needs; its bin is `tsc6`, so it never shadows
+the native `tsc`.) There is no build step — the package ships TypeScript source
+directly (both npm and JSR reference `src/**/*.ts`), so consumers compile it
+through their own bundler.
 
 ## Conventions and gotchas
 
