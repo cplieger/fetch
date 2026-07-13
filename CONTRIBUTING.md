@@ -24,17 +24,20 @@ paired with a colocated `*.test.ts`:
   it, so successive calls accumulate.
 - `request.ts` — the core. `makeRequestRaw(getConfig)` builds a config-bound
   `requestRaw` (builds the request, runs the fetch, resolves to an `ApiResult`);
-  `makeRequest` wraps it into the null-collapsing `request`. The exported
-  `requestRaw` / `request` are the default-instance bindings (bound to the
-  module-global config).
+  `makeRequest` wraps it into the null-collapsing `request`. These are
+  config-parametrized factories; the default-instance `requestRaw` /
+  `request` bindings are assembled in `instance.ts`.
 - `verbs.ts` — `makeVerbs(request, requestRaw)` builds the 12 thin per-verb
   helpers (`apiGet`, `apiGetRaw`, `apiGetTyped`, …) bound to a request pair; the
-  exported helpers are the default bindings.
-- `instance.ts` — `createFetch(initialConfig?)` composes an isolated
-  `createConfigStore` with `makeRequestRaw` / `makeRequest` / `makeVerbs` into a
-  `FetchInstance` (its own `requestRaw` / `request` / 12 verbs / `configure`), so
-  multiple origins / credential-sets can coexist without the module-global
-  default.
+  default-instance verb bindings are assembled in `instance.ts`.
+- `instance.ts` — the single instance-assembly site. An internal
+  `buildInstance(store)` composes a `ConfigStore` with `makeRequestRaw` /
+  `makeRequest` / `makeVerbs` into a `FetchInstance` (its own `requestRaw` /
+  `request` / 12 verbs / `configure`). `createFetch(initialConfig?)` builds one
+  over a fresh isolated `createConfigStore`, so multiple origins /
+  credential-sets can coexist without the module-global default; the default
+  surface (the top-level `requestRaw` / `request` / `apiGet` … re-exported by
+  `index.ts`) is the same `buildInstance` over the shared `defaultStore`.
 
 The public API is whatever `src/index.ts` re-exports — that file is the
 contract. Update it deliberately, and keep the README `## API` section in sync.

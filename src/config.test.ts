@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { configureFetch, resetFetchConfig, getFetchConfig } from "./config.js";
-import { requestRaw } from "./request.js";
+import { requestRaw } from "./instance.js";
 
 function stubFetch(res: Response): typeof fetch {
   return vi.fn().mockResolvedValue(res) as unknown as typeof fetch;

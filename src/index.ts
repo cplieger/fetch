@@ -14,11 +14,11 @@ export type { FetchInstance } from "./instance.js";
 // Timeout composition
 export { API_TIMEOUT_MS, withTimeout } from "./timeout.js";
 
-// Request core
-export { request, requestRaw } from "./request.js";
-
-// Verb helpers
+// Request core + verb helpers — the default-instance surface, assembled in
+// instance.ts (bound to the module-global default store).
 export {
+  request,
+  requestRaw,
   apiGet,
   apiPost,
   apiPut,
@@ -31,7 +31,7 @@ export {
   apiPutRaw,
   apiPatchRaw,
   apiDeleteRaw,
-} from "./verbs.js";
+} from "./instance.js";
 
 // Types
 export type { ApiErr, ApiOk, ApiResult, Decoder, HttpMethod, RequestOptions } from "./types.js";

@@ -1,11 +1,10 @@
 // Thin per-verb helpers over a request core. The plain helpers null-collapse
 // (return T | null); the *Raw helpers surface the full ApiResult envelope; the
 // *Typed helpers thread a decoder for runtime validation. makeVerbs binds a
-// (request, requestRaw) pair — the module-global default, or a per-instance
-// pair from createFetch. The exported apiGet/… are the default bindings.
+// (request, requestRaw) pair — the module-global default or a per-instance pair
+// from createFetch (both assembled in instance.ts).
 // ---------------------------------------------------------------------------
 
-import { request as defaultRequest, requestRaw as defaultRequestRaw } from "./request.js";
 import type { ApiResult, Decoder, RequestFn, RequestOptions, RequestRawFn } from "./types.js";
 
 /** The bundle of 12 verb helpers a fetch instance exposes. */
@@ -92,21 +91,5 @@ export function makeVerbs(request: RequestFn, requestRaw: RequestRawFn): FetchVe
   };
 }
 
-// --- Default instance verb helpers (bound to the module-global default) ----
-const defaultVerbs: FetchVerbs = makeVerbs(defaultRequest, defaultRequestRaw);
-
-// Individual typed re-exports (not `export const { … } = defaultVerbs`): JSR's
-// no-slow-types check rejects a destructuring export and requires each public
-// symbol to carry an explicit type. Same runtime bindings, explicit types.
-export const apiGet: FetchVerbs["apiGet"] = defaultVerbs.apiGet;
-export const apiPost: FetchVerbs["apiPost"] = defaultVerbs.apiPost;
-export const apiPut: FetchVerbs["apiPut"] = defaultVerbs.apiPut;
-export const apiPatch: FetchVerbs["apiPatch"] = defaultVerbs.apiPatch;
-export const apiDelete: FetchVerbs["apiDelete"] = defaultVerbs.apiDelete;
-export const apiGetTyped: FetchVerbs["apiGetTyped"] = defaultVerbs.apiGetTyped;
-export const apiPostTyped: FetchVerbs["apiPostTyped"] = defaultVerbs.apiPostTyped;
-export const apiGetRaw: FetchVerbs["apiGetRaw"] = defaultVerbs.apiGetRaw;
-export const apiPostRaw: FetchVerbs["apiPostRaw"] = defaultVerbs.apiPostRaw;
-export const apiPutRaw: FetchVerbs["apiPutRaw"] = defaultVerbs.apiPutRaw;
-export const apiPatchRaw: FetchVerbs["apiPatchRaw"] = defaultVerbs.apiPatchRaw;
-export const apiDeleteRaw: FetchVerbs["apiDeleteRaw"] = defaultVerbs.apiDeleteRaw;
+// The default-instance verb bindings live in instance.ts (assembled once via
+// buildInstance from the shared defaultStore), alongside the createFetch path.
