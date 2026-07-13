@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { configureFetch, resetFetchConfig } from "./config.js";
-import { request, requestRaw } from "./request.js";
+import { request, requestRaw } from "./instance.js";
 import type { Decoder } from "./types.js";
 
 /** Build a stub fetch that always resolves to the given Response. */
@@ -378,7 +378,7 @@ describe("requestRaw — buggy fetchFn results are classified, never thrown", ()
   });
 });
 
-describe("requestRaw — a null body is no body (F5)", () => {
+describe("requestRaw — null request bodies", () => {
   it("sends neither payload nor Content-Type for a null body", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
     configureFetch({ fetchFn });
@@ -461,5 +461,39 @@ describe("requestRaw — maxResponseBytes", () => {
     configureFetch({ fetchFn, maxResponseBytes: 8 });
     const r = await requestRaw("GET", "/x");
     expect(r).toEqual({ ok: false, status: 413, error: "HTTP 413" });
+  });
+
+  it("reads a null-body 2xx via res.text() when a cap is set", async () => {
+    const fetchFn = stubFetch(new Response(null, { status: 200 }));
+    configureFetch({ fetchFn, maxResponseBytes: 16 });
+    const r = await requestRaw("GET", "/x");
+    expect(r).toEqual({ ok: true, status: 200, data: undefined });
+  });
+
+  it("accepts a body whose content-length exactly equals the cap", async () => {
+    const fetchFn = stubFetch(
+      new Response("[1,2]", { status: 200, headers: { "content-length": "5" } }),
+    );
+    configureFetch({ fetchFn, maxResponseBytes: 5 });
+    const r = await requestRaw<number[]>("GET", "/x");
+    expect(r).toEqual({ ok: true, status: 200, data: [1, 2] });
+  });
+
+  it("accepts a streamed body whose total exactly equals the cap", async () => {
+    const chunks = [new TextEncoder().encode("[1,2]")];
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const chunk = chunks.shift();
+        if (chunk === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+    const fetchFn = stubFetch(new Response(body, { status: 200 }));
+    configureFetch({ fetchFn, maxResponseBytes: 5 });
+    const r = await requestRaw<number[]>("GET", "/x");
+    expect(r).toEqual({ ok: true, status: 200, data: [1, 2] });
   });
 });

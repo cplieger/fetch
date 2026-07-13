@@ -1,6 +1,6 @@
 // @vitest-environment node
 //
-// Client-side "invalid" classification (F2). These run under the *node*
+// Client-side "invalid" classification. These run under the *node*
 // environment rather than happy-dom: they rely on the platform's strict
 // validation of header names, timeout ranges, and JSON encoding to make the
 // build phase throw. happy-dom's Headers / AbortSignal stubs are lenient and
@@ -9,7 +9,7 @@
 // the throw and classifies it as "invalid" (never "network").
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { configureFetch, resetFetchConfig } from "./config.js";
-import { requestRaw } from "./request.js";
+import { requestRaw } from "./instance.js";
 
 function stubFetch(res: Response): typeof fetch {
   return vi.fn().mockResolvedValue(res) as unknown as typeof fetch;
@@ -73,6 +73,19 @@ describe("requestRaw — client-side 'invalid' classification (never throws)", (
     const fetchFn = stubFetch(new Response("{}", { status: 200 }));
     configureFetch({ fetchFn });
     const r = await requestRaw("POST", "/x", { body: () => 1 });
+    expect(r).toMatchObject({ ok: false, status: 0, code: "invalid" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("classifies a throwing signal getter as invalid, without fetching", async () => {
+    const fetchFn = stubFetch(new Response("{}", { status: 200 }));
+    configureFetch({ fetchFn });
+    const opts = {
+      get signal(): AbortSignal {
+        throw new Error("signal getter boom");
+      },
+    };
+    const r = await requestRaw("GET", "/x", opts);
     expect(r).toMatchObject({ ok: false, status: 0, code: "invalid" });
     expect(fetchFn).not.toHaveBeenCalled();
   });

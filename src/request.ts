@@ -2,12 +2,10 @@
 // the resolved config layer, and ALWAYS resolves to an ApiResult<T> — every
 // failure mode (invalid, network, timeout, cancellation, non-2xx, decode) is
 // returned, never thrown. request() is the thin null-collapsing wrapper over
-// it. makeRequestRaw/makeRequest bind a config source (the module-global
-// default, or a per-instance store from createFetch); the exported requestRaw/
-// request are the default-instance bindings.
+// it. makeRequestRaw/makeRequest are the config-parametrized factories, bound
+// to the module-global default or a per-instance store in instance.ts.
 // ---------------------------------------------------------------------------
 
-import { getFetchConfig } from "./config.js";
 import type { FetchConfig } from "./config.js";
 import { API_TIMEOUT_MS, withTimeout } from "./timeout.js";
 import type {
@@ -24,7 +22,7 @@ const JSON_CT = "application/json";
 /** Extract a human-readable message from an unknown thrown value without
  *  risking a `[object Object]` stringification. */
 function errMsg(e: unknown): string {
-  if (e instanceof Error) {
+  if (e instanceof Error || e instanceof DOMException) {
     return e.message;
   }
   if (typeof e === "string") {
@@ -64,7 +62,10 @@ function statusOf(res: Response): number {
  * Neutralize a relative path's parser-significant navigation syntax before it
  * is concatenated onto a base URL, so a crafted path cannot escape the base
  * path prefix via URL normalization. A leading slash is ensured, backslashes
- * (special-scheme URL parsing treats `\` as `/`) are percent-encoded, and any
+ * (special-scheme URL parsing treats `\` as `/`) are percent-encoded, the
+ * ASCII TAB / LF / CR the WHATWG URL parser strips outright (else two dots
+ * astride a stripped char could fuse into a live `..` after the guard) are
+ * percent-encoded (`%09` / `%0A` / `%0D`) in the path part only, and any
  * dot-segment — `.` / `..` and the percent-encoded equivalents (`%2e`,
  * `%2e%2e`, `.%2e`, …) the WHATWG URL parser would otherwise pop — is
  * double-encoded so it survives normalization as opaque path data. The dots
@@ -84,6 +85,9 @@ function safeSuffix(path: string): string {
   const raw = pathPart.startsWith("/") ? pathPart : `/${pathPart}`;
   const encoded = raw
     .replace(/\\/g, "%5C")
+    .replace(/\t/g, "%09")
+    .replace(/\n/g, "%0A")
+    .replace(/\r/g, "%0D")
     .split("/")
     .map((segment) => {
       const dotLike = segment.replace(/%2e/gi, ".");
@@ -249,7 +253,7 @@ export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
     opts?: RequestOptions<T>,
   ): Promise<ApiResult<T>> {
     const cfg = getConfig();
-    const callerSignal = opts?.signal;
+    let callerSignal: AbortSignal | undefined;
 
     // --- Build phase ------------------------------------------------------
     // Header construction, JSON body encoding, the prepareHeaders hook, timeout
@@ -259,6 +263,7 @@ export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
     const init: RequestInit = { method };
     let url: string;
     try {
+      callerSignal = opts?.signal;
       const headers = new Headers();
       // A null / undefined body means "no body": send neither payload nor a
       // Content-Type (POSTing a literal JSON `null` is a non-need).
@@ -360,13 +365,3 @@ export function makeRequest(raw: RequestRawFn): RequestFn {
     return result.ok && result.data !== undefined ? result.data : null;
   };
 }
-
-// --- Default instance (bound to the module-global config store) ------------
-// The byte-compatible existing surface: these read the config that
-// configureFetch / resetFetchConfig mutate.
-
-/** The default-instance non-throwing request core. See {@link makeRequestRaw}. */
-export const requestRaw: RequestRawFn = makeRequestRaw(getFetchConfig);
-
-/** The default-instance null-collapsing request. See {@link makeRequest}. */
-export const request: RequestFn = makeRequest(requestRaw);
