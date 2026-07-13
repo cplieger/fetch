@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fc from "fast-check";
 import { configureFetch, resetFetchConfig } from "./config.js";
-import { requestRaw } from "./request.js";
+import { requestRaw } from "./instance.js";
 
 beforeEach(() => {
   resetFetchConfig();

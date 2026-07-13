@@ -69,7 +69,9 @@ export function createConfigStore(initial: FetchConfig = {}): ConfigStore {
 
 // The module-global default store — backs configureFetch / getFetchConfig /
 // resetFetchConfig and the default fetch instance (the top-level apiGet/…).
-const defaultStore = createConfigStore();
+/** The module-global default config store. @internal Consumed by instance.ts
+ *  to assemble the default fetch instance; not part of the public surface. */
+export const defaultStore = createConfigStore();
 
 /**
  * Configure the global fetch layer used by every top-level request. Shallow-
@@ -97,7 +99,7 @@ export function resetFetchConfig(): void {
   defaultStore.reset();
 }
 
-/** Read the current global fetch config. @internal Used by request.ts. */
+/** Read the current global fetch config. @internal Test-only. */
 export function getFetchConfig(): FetchConfig {
   return defaultStore.get();
 }

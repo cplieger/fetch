@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createFetch, type FetchInstance } from "./instance.js";
-import { apiGet } from "./verbs.js";
+import { createFetch, apiGet, type FetchInstance } from "./instance.js";
 import { configureFetch, resetFetchConfig } from "./config.js";
 
 function stubFetch(res: Response): typeof fetch {

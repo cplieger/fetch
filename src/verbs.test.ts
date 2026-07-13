@@ -14,7 +14,7 @@ import {
   apiPutRaw,
   apiPatchRaw,
   apiDeleteRaw,
-} from "./verbs.js";
+} from "./instance.js";
 import type { Decoder } from "./types.js";
 
 function stubFetch(res: Response): typeof fetch {
