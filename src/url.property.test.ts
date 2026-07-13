@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import fc from "fast-check";
 import { configureFetch, resetFetchConfig } from "./config.js";
-import { requestRaw } from "./request.js";
+import { requestRaw } from "./instance.js";
 
 const ORIGIN = "https://api.example.com";
 
@@ -100,11 +100,17 @@ describe("baseUrl + path joining (property)", () => {
       "/..\\admin",
       // A `..` / `.` fused to a trailing `?`/`#` with no intervening `/` is
       // still a live navigation operator during URL normalization, so it must
-      // be neutralized like any other dot-segment (h-f1: the cycle-2 guard
-      // split on `/` only and missed these, letting them escape the base path).
+      // be neutralized like any other dot-segment.
       "/..?x=1",
       "/foo/..?x=1",
       "/..#frag",
+      // ASCII TAB / LF / CR are stripped by the WHATWG URL parser before path
+      // normalization; percent-encoding them first prevents adjacent dots from
+      // fusing into live `..` navigation.
+      "/\t../admin",
+      "/.\t./admin",
+      "/.\n./admin",
+      "/..\r/admin",
     ];
     for (const path of adversarial) {
       resetFetchConfig();
@@ -137,5 +143,37 @@ describe("baseUrl + path joining (property)", () => {
       // the server byte-for-byte, so path-valued query data is not mangled.
       expect(url).toBe(expected);
     }
+  });
+
+  it("keeps any generated dot-segment / backslash path inside the base path (generator)", async () => {
+    const BASE = `${ORIGIN}/v1`;
+    const dangerToken = fc.constantFrom(
+      "a",
+      "1",
+      ".",
+      "..",
+      "%2e",
+      "%2E",
+      ".%2e",
+      "%2e.",
+      "\\",
+      "\\..",
+      "..\\",
+    );
+    const dangerPath = fc
+      .array(dangerToken, { minLength: 1, maxLength: 8 })
+      .map((toks) => `/${toks.join("/")}`);
+    await fc.assert(
+      fc.asyncProperty(dangerPath, async (path) => {
+        resetFetchConfig();
+        const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+        configureFetch({ baseUrl: BASE, fetchFn });
+        await requestRaw("GET", path);
+        const parsed = new URL(fetchFn.mock.calls[0]![0] as string);
+        expect(parsed.origin).toBe(ORIGIN);
+        expect(parsed.pathname.startsWith("/v1/")).toBe(true);
+      }),
+      { numRuns: 300 },
+    );
   });
 });
