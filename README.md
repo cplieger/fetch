@@ -3,6 +3,7 @@
 [![npm](https://img.shields.io/npm/v/@cplieger/fetch)](https://www.npmjs.com/package/@cplieger/fetch)
 [![JSR](https://jsr.io/badges/@cplieger/fetch)](https://jsr.io/@cplieger/fetch)
 [![Test coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/fetch/badges/coverage.json)](https://github.com/cplieger/fetch/actions/workflows/coverage.yml)
+[![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/fetch/badges/mutation-ts.json)](https://github.com/cplieger/fetch/issues?q=label%3Astryker-tracker)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13488/badge)](https://www.bestpractices.dev/projects/13488)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/fetch/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/fetch)
 
