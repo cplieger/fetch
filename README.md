@@ -113,6 +113,8 @@ await api.apiDeleteRaw("/items/1", { ignoreBody: true });
 ```
 
 > **Path contract:** `path` is expected to be a **relative** path. With `baseUrl` set, the configured scheme+host always precede it, so an absolute (`https://…`) or protocol-relative (`//host`) path is neutralised (kept as a path segment) and cannot override the origin. A relative `path` also cannot escape the configured base path via `..` / dot-segment or backslash navigation — those are percent-encoded so the base path prefix always stands, while the query string and fragment are preserved verbatim. For this origin-override protection to hold, `baseUrl` must be an **absolute** URL (scheme + host); an empty or relative `baseUrl` does not neutralise a protocol-relative `path`. With `baseUrl` **unset**, `path` is passed to `fetch()` verbatim — the caller owns the full URL and must never pass untrusted input as the whole path.
+>
+> _Design note — neutralize, not reject (considered and declined):_ returning a pre-network `code: "invalid"` for navigation syntax instead of neutralizing it was evaluated and declined. The documented leading-slash-relative-to-base rule deliberately differs from WHATWG resolution (where `/users` means origin-root), so a parser-based validate-and-reject must hand-maintain the same invariant set this contract already encodes — with mistakes surfacing as false rejections of correct requests instead of today's fail-safe neutralized send. Neutralize-and-forward stays the contract.
 
 ### Multiple backends
 
