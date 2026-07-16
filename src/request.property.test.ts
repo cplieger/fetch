@@ -1,12 +1,8 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import fc from "fast-check";
-import { configureFetch, resetFetchConfig } from "./config.js";
-import { requestRaw } from "./instance.js";
+import { createFetch } from "./instance.js";
 
-beforeEach(() => {
-  resetFetchConfig();
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -15,10 +11,9 @@ describe("parseErrorResponse (property)", () => {
   it("returns a well-formed ApiErr for any JSON error body and never throws", async () => {
     await fc.assert(
       fc.asyncProperty(fc.integer({ min: 400, max: 599 }), fc.jsonValue(), async (status, body) => {
-        resetFetchConfig();
         const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
-        configureFetch({ fetchFn });
-        const r = await requestRaw("GET", "/x");
+        const fx = createFetch({ fetchFn: fetchFn as unknown as typeof fetch });
+        const r = await fx.requestRaw("GET", "/x");
         expect(r.ok).toBe(false);
         if (r.ok) {
           return;
@@ -31,6 +26,8 @@ describe("parseErrorResponse (property)", () => {
         if (r.requestId !== undefined) {
           expect(typeof r.requestId).toBe("string");
         }
+        // A non-2xx always came from a real response, so headers are present.
+        expect(r.headers).toBeInstanceOf(Headers);
       }),
       { numRuns: 300 },
     );
@@ -51,10 +48,9 @@ describe("parseErrorResponse (property)", () => {
           { requiredKeys: [] },
         ),
         async (status, body) => {
-          resetFetchConfig();
           const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
-          configureFetch({ fetchFn });
-          const r = await requestRaw("GET", "/x");
+          const fx = createFetch({ fetchFn: fetchFn as unknown as typeof fetch });
+          const r = await fx.requestRaw("GET", "/x");
           expect(r.ok).toBe(false);
           if (r.ok) {
             return;

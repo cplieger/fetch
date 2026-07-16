@@ -1,5 +1,5 @@
-// Request timeout composition. Mirrors the withTimeout helper from
-// @cplieger/actions so both libraries share the same cancellation shape.
+// Request timeout composition. The toolkit's single implementation:
+// @cplieger/actions and app layers import these rather than carrying copies.
 // ---------------------------------------------------------------------------
 
 /** Default request timeout in milliseconds. */

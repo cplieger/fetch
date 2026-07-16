@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from "vitest";
 import fc from "fast-check";
-import { configureFetch, resetFetchConfig } from "./config.js";
-import { requestRaw } from "./instance.js";
+import { createFetch } from "./instance.js";
 
 const ORIGIN = "https://api.example.com";
 
@@ -24,10 +23,9 @@ describe("baseUrl + path joining (property)", () => {
           const baseUrl = ORIGIN + (baseTrailingSlash ? "/" : "");
           const path = (pathLeadingSlash ? "/" : "") + segs.join("/");
 
-          resetFetchConfig();
           const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-          configureFetch({ baseUrl, fetchFn });
-          await requestRaw("GET", path);
+          const fx = createFetch({ baseUrl, fetchFn: fetchFn as unknown as typeof fetch });
+          await fx.requestRaw("GET", path);
 
           const url = fetchFn.mock.calls[0]![0] as string;
           const expectedPath = segs.join("/");
@@ -48,10 +46,9 @@ describe("baseUrl + path joining (property)", () => {
     await fc.assert(
       fc.asyncProperty(fc.array(segment, { minLength: 1, maxLength: 5 }), async (segs) => {
         const path = `/${segs.join("/")}`;
-        resetFetchConfig();
         const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-        configureFetch({ fetchFn });
-        await requestRaw("GET", path);
+        const fx = createFetch({ fetchFn: fetchFn as unknown as typeof fetch });
+        await fx.requestRaw("GET", path);
         expect(fetchFn.mock.calls[0]![0]).toBe(path);
       }),
       { numRuns: 100 },
@@ -78,10 +75,9 @@ describe("baseUrl + path joining (property)", () => {
         fc.array(segment, { minLength: 1, maxLength: 4 }),
         async (prefix, segs) => {
           const path = `${prefix}/${segs.join("/")}`;
-          resetFetchConfig();
           const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-          configureFetch({ baseUrl: ORIGIN, fetchFn });
-          await requestRaw("GET", path);
+          const fx = createFetch({ baseUrl: ORIGIN, fetchFn: fetchFn as unknown as typeof fetch });
+          await fx.requestRaw("GET", path);
           const url = fetchFn.mock.calls[0]![0] as string;
           // A crafted path can never override the configured origin.
           expect(new URL(url).origin).toBe(ORIGIN);
@@ -113,10 +109,9 @@ describe("baseUrl + path joining (property)", () => {
       "/..\r/admin",
     ];
     for (const path of adversarial) {
-      resetFetchConfig();
       const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-      configureFetch({ baseUrl: BASE, fetchFn });
-      await requestRaw("GET", path);
+      const fx = createFetch({ baseUrl: BASE, fetchFn: fetchFn as unknown as typeof fetch });
+      await fx.requestRaw("GET", path);
       const url = fetchFn.mock.calls[0]![0] as string;
       const parsed = new URL(url);
       // Cannot escape the origin ...
@@ -134,10 +129,9 @@ describe("baseUrl + path joining (property)", () => {
       ["/page#/../frag", `${BASE}/page#/../frag`],
     ];
     for (const [path, expected] of cases) {
-      resetFetchConfig();
       const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-      configureFetch({ baseUrl: BASE, fetchFn });
-      await requestRaw("GET", path);
+      const fx = createFetch({ baseUrl: BASE, fetchFn: fetchFn as unknown as typeof fetch });
+      await fx.requestRaw("GET", path);
       const url = fetchFn.mock.calls[0]![0] as string;
       // Dot-segment neutralization is PATH-only: the query / fragment reaches
       // the server byte-for-byte, so path-valued query data is not mangled.
@@ -165,10 +159,9 @@ describe("baseUrl + path joining (property)", () => {
       .map((toks) => `/${toks.join("/")}`);
     await fc.assert(
       fc.asyncProperty(dangerPath, async (path) => {
-        resetFetchConfig();
         const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-        configureFetch({ baseUrl: BASE, fetchFn });
-        await requestRaw("GET", path);
+        const fx = createFetch({ baseUrl: BASE, fetchFn: fetchFn as unknown as typeof fetch });
+        await fx.requestRaw("GET", path);
         const parsed = new URL(fetchFn.mock.calls[0]![0] as string);
         expect(parsed.origin).toBe(ORIGIN);
         expect(parsed.pathname.startsWith("/v1/")).toBe(true);

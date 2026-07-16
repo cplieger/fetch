@@ -1,12 +1,12 @@
 // The non-throwing core. requestRaw builds the request, performs the fetch via
-// the resolved config layer, and ALWAYS resolves to an ApiResult<T> — every
+// the instance's config, and ALWAYS resolves to an ApiResult<T> — every
 // failure mode (invalid, network, timeout, cancellation, non-2xx, decode) is
 // returned, never thrown. request() is the thin null-collapsing wrapper over
 // it. makeRequestRaw/makeRequest are the config-parametrized factories, bound
-// to the module-global default or a per-instance store in instance.ts.
+// to an immutable per-instance config in instance.ts.
 // ---------------------------------------------------------------------------
 
-import type { FetchConfig } from "./config.js";
+import type { FetchConfig } from "./types.js";
 import { API_TIMEOUT_MS, withTimeout } from "./timeout.js";
 import type {
   ApiErr,
@@ -36,9 +36,24 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-/** Build an ApiErr, omitting optional fields when absent (exactOptionalPropertyTypes). */
-function makeErr(status: number, error: string, code?: string, requestId?: string): ApiErr {
-  const err: { ok: false; status: number; error: string; code?: string; requestId?: string } = {
+/** Build an ApiErr, omitting optional fields when absent (exactOptionalPropertyTypes).
+ *  `headers` is passed only where a real HTTP response exists (non-2xx or a
+ *  2xx decode failure), per the ApiErr.headers contract. */
+function makeErr(
+  status: number,
+  error: string,
+  code?: string,
+  requestId?: string,
+  headers?: Headers,
+): ApiErr {
+  const err: {
+    ok: false;
+    status: number;
+    error: string;
+    code?: string;
+    requestId?: string;
+    headers?: Headers;
+  } = {
     ok: false,
     status,
     error,
@@ -48,6 +63,9 @@ function makeErr(status: number, error: string, code?: string, requestId?: strin
   }
   if (requestId !== undefined) {
     err.requestId = requestId;
+  }
+  if (headers !== undefined) {
+    err.headers = headers;
   }
   return err;
 }
@@ -238,21 +256,20 @@ async function parseErrorResponse(res: Response, max: number | undefined): Promi
   } catch {
     // Non-JSON / empty error body — keep the `HTTP <status>` fallback.
   }
-  return makeErr(status, error, code, requestId);
+  return makeErr(status, error, code, requestId, res.headers);
 }
 
 /**
- * Build the non-throwing request core bound to a config source. `getConfig` is
- * called at the START of every request, so a `configure`/`configureFetch` that
- * runs after the instance is created is reflected on the next call.
+ * Build the non-throwing request core bound to an immutable config. The config
+ * is captured once at instance construction ({@link createFetch}); a changed
+ * backend produces a new instance.
  */
-export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
+export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
   return async function requestRaw<T>(
     method: HttpMethod,
     path: string,
     opts?: RequestOptions<T>,
   ): Promise<ApiResult<T>> {
-    const cfg = getConfig();
     let callerSignal: AbortSignal | undefined;
 
     // --- Build phase ------------------------------------------------------
@@ -321,6 +338,18 @@ export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
         return { ok: true, status, data: undefined as T };
       }
 
+      if (opts?.ignoreBody === true) {
+        // Caller declared the success body irrelevant: skip the read and the
+        // decoder entirely. Cancel the unread stream so the connection is
+        // released (best-effort; a null body or a locked stream is fine).
+        try {
+          await res.body?.cancel();
+        } catch {
+          // Releasing the unread body is best-effort.
+        }
+        return { ok: true, status, data: undefined as T };
+      }
+
       const text = await readBounded(res, cfg.maxResponseBytes);
       if (text === "") {
         return { ok: true, status, data: undefined as T };
@@ -330,14 +359,20 @@ export function makeRequestRaw(getConfig: () => FetchConfig): RequestRawFn {
       try {
         parsed = JSON.parse(text);
       } catch (e) {
-        return makeErr(status, `response not JSON: ${errMsg(e)}`, "decode");
+        return makeErr(status, `response not JSON: ${errMsg(e)}`, "decode", undefined, res.headers);
       }
 
       if (opts?.decoder !== undefined) {
         try {
           return { ok: true, status, data: opts.decoder(parsed) };
         } catch (e) {
-          return makeErr(status, `response shape mismatch: ${errMsg(e)}`, "decode");
+          return makeErr(
+            status,
+            `response shape mismatch: ${errMsg(e)}`,
+            "decode",
+            undefined,
+            res.headers,
+          );
         }
       }
 

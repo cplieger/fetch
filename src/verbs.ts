@@ -91,5 +91,4 @@ export function makeVerbs(request: RequestFn, requestRaw: RequestRawFn): FetchVe
   };
 }
 
-// The default-instance verb bindings live in instance.ts (assembled once via
-// buildInstance from the shared defaultStore), alongside the createFetch path.
+// The verb bindings are assembled per instance in instance.ts (createFetch).

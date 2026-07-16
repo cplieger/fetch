@@ -1,20 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { configureFetch, resetFetchConfig } from "./config.js";
-import {
-  apiGet,
-  apiPost,
-  apiPut,
-  apiPatch,
-  apiDelete,
-  apiGetTyped,
-  apiPostTyped,
-  apiGetRaw,
-  apiPostRaw,
-  apiPutRaw,
-  apiPatchRaw,
-  apiDeleteRaw,
-} from "./instance.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { createFetch } from "./instance.js";
 import type { Decoder } from "./types.js";
 
 function stubFetch(res: Response): typeof fetch {
@@ -24,9 +10,6 @@ function call(fn: typeof fetch): [string, RequestInit] {
   return (fn as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]!;
 }
 
-beforeEach(() => {
-  resetFetchConfig();
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -34,16 +17,16 @@ afterEach(() => {
 describe("null-collapsing verb helpers", () => {
   it("apiGet issues a GET and returns data", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ a: 1 }), { status: 200 }));
-    configureFetch({ fetchFn });
-    const data = await apiGet<{ a: number }>("/x");
+    const fx = createFetch({ fetchFn });
+    const data = await fx.apiGet<{ a: number }>("/x");
     expect(data).toEqual({ a: 1 });
     expect(call(fetchFn)[1].method).toBe("GET");
   });
 
   it("apiPost issues a POST with a JSON body", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ id: 1 }), { status: 201 }));
-    configureFetch({ fetchFn });
-    const data = await apiPost<{ id: number }>("/x", { name: "n" });
+    const fx = createFetch({ fetchFn });
+    const data = await fx.apiPost<{ id: number }>("/x", { name: "n" });
     expect(data).toEqual({ id: 1 });
     const [, init] = call(fetchFn);
     expect(init.method).toBe("POST");
@@ -52,13 +35,13 @@ describe("null-collapsing verb helpers", () => {
   });
 
   it("apiPut and apiPatch issue their verb with a body", async () => {
-    for (const [fn, method] of [
-      [apiPut, "PUT"],
-      [apiPatch, "PATCH"],
+    for (const [name, method] of [
+      ["apiPut", "PUT"],
+      ["apiPatch", "PATCH"],
     ] as const) {
       const fetchFn = stubFetch(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
-      configureFetch({ fetchFn });
-      await fn("/x", { v: 1 });
+      const fx = createFetch({ fetchFn });
+      await fx[name]("/x", { v: 1 });
       expect(call(fetchFn)[1].method).toBe(method);
       expect(call(fetchFn)[1].body).toBe(JSON.stringify({ v: 1 }));
     }
@@ -66,8 +49,8 @@ describe("null-collapsing verb helpers", () => {
 
   it("apiDelete issues a DELETE with no body (204 collapses to null)", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
-    configureFetch({ fetchFn });
-    const data = await apiDelete("/x");
+    const fx = createFetch({ fetchFn });
+    const data = await fx.apiDelete("/x");
     expect(data).toBeNull();
     expect(call(fetchFn)[1].method).toBe("DELETE");
     expect(call(fetchFn)[1].body).toBeUndefined();
@@ -75,14 +58,14 @@ describe("null-collapsing verb helpers", () => {
 
   it("returns null on an error status", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ error: "no" }), { status: 500 }));
-    configureFetch({ fetchFn });
-    expect(await apiGet("/x")).toBeNull();
+    const fx = createFetch({ fetchFn });
+    expect(await fx.apiGet("/x")).toBeNull();
   });
 
   it("threads per-request opts (headers) alongside the body", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
-    configureFetch({ fetchFn });
-    await apiPost("/x", { a: 1 }, { headers: { "X-Req": "1" } });
+    const fx = createFetch({ fetchFn });
+    await fx.apiPost("/x", { a: 1 }, { headers: { "X-Req": "1" } });
     const [, init] = call(fetchFn);
     expect((init.headers as Headers).get("x-req")).toBe("1");
     expect(init.body).toBe(JSON.stringify({ a: 1 }));
@@ -90,8 +73,8 @@ describe("null-collapsing verb helpers", () => {
 
   it("lets the body argument win over an opts.body", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
-    configureFetch({ fetchFn });
-    await apiPost("/x", { winner: true }, { body: { loser: true } });
+    const fx = createFetch({ fetchFn });
+    await fx.apiPost("/x", { winner: true }, { body: { loser: true } });
     expect(call(fetchFn)[1].body).toBe(JSON.stringify({ winner: true }));
   });
 });
@@ -106,20 +89,20 @@ describe("decoder-validated verb helpers", () => {
 
   it("apiGetTyped validates and returns data", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ n: 3 }), { status: 200 }));
-    configureFetch({ fetchFn });
-    expect(await apiGetTyped("/x", numDecoder)).toEqual({ n: 3 });
+    const fx = createFetch({ fetchFn });
+    expect(await fx.apiGetTyped("/x", numDecoder)).toEqual({ n: 3 });
   });
 
   it("apiGetTyped returns null when the decoder rejects the shape", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ wrong: 1 }), { status: 200 }));
-    configureFetch({ fetchFn });
-    expect(await apiGetTyped("/x", numDecoder)).toBeNull();
+    const fx = createFetch({ fetchFn });
+    expect(await fx.apiGetTyped("/x", numDecoder)).toBeNull();
   });
 
   it("apiPostTyped sends the body, validates, and returns data", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ n: 9 }), { status: 200 }));
-    configureFetch({ fetchFn });
-    const data = await apiPostTyped("/x", { in: true }, numDecoder);
+    const fx = createFetch({ fetchFn });
+    const data = await fx.apiPostTyped("/x", { in: true }, numDecoder);
     expect(data).toEqual({ n: 9 });
     expect(call(fetchFn)[1].body).toBe(JSON.stringify({ in: true }));
   });
@@ -128,27 +111,32 @@ describe("decoder-validated verb helpers", () => {
 describe("envelope (*Raw) verb helpers", () => {
   it("apiGetRaw returns an ok envelope", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ a: 1 }), { status: 200 }));
-    configureFetch({ fetchFn });
-    expect(await apiGetRaw("/x")).toEqual({ ok: true, status: 200, data: { a: 1 } });
+    const fx = createFetch({ fetchFn });
+    expect(await fx.apiGetRaw("/x")).toEqual({ ok: true, status: 200, data: { a: 1 } });
   });
 
   it("apiGetRaw returns an err envelope with lifted fields", async () => {
     const fetchFn = stubFetch(
       new Response(JSON.stringify({ error: "bad", code: "c1" }), { status: 400 }),
     );
-    configureFetch({ fetchFn });
-    expect(await apiGetRaw("/x")).toEqual({ ok: false, status: 400, error: "bad", code: "c1" });
+    const fx = createFetch({ fetchFn });
+    expect(await fx.apiGetRaw("/x")).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "bad",
+      code: "c1",
+    });
   });
 
   it("apiPostRaw / apiPutRaw / apiPatchRaw send a body and return an envelope", async () => {
-    for (const [fn, method] of [
-      [apiPostRaw, "POST"],
-      [apiPutRaw, "PUT"],
-      [apiPatchRaw, "PATCH"],
+    for (const [name, method] of [
+      ["apiPostRaw", "POST"],
+      ["apiPutRaw", "PUT"],
+      ["apiPatchRaw", "PATCH"],
     ] as const) {
       const fetchFn = stubFetch(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
-      configureFetch({ fetchFn });
-      const r = await fn("/x", { v: 1 });
+      const fx = createFetch({ fetchFn });
+      const r = await fx[name]("/x", { v: 1 });
       expect(r).toEqual({ ok: true, status: 200, data: { ok: 1 } });
       expect(call(fetchFn)[1].method).toBe(method);
       expect(call(fetchFn)[1].body).toBe(JSON.stringify({ v: 1 }));
@@ -157,16 +145,16 @@ describe("envelope (*Raw) verb helpers", () => {
 
   it("apiDeleteRaw returns an envelope", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
-    configureFetch({ fetchFn });
-    expect(await apiDeleteRaw("/x")).toEqual({ ok: true, status: 204, data: undefined });
+    const fx = createFetch({ fetchFn });
+    expect(await fx.apiDeleteRaw("/x")).toEqual({ ok: true, status: 204, data: undefined });
   });
 });
 
 describe("null body + empty body helpers", () => {
   it("apiPost with a null body sends no body / no Content-Type", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
-    configureFetch({ fetchFn });
-    await apiPost("/x", null);
+    const fx = createFetch({ fetchFn });
+    await fx.apiPost("/x", null);
     const [, init] = call(fetchFn);
     expect(init.body).toBeUndefined();
     expect((init.headers as Headers).get("content-type")).toBeNull();
@@ -174,7 +162,7 @@ describe("null body + empty body helpers", () => {
 
   it("apiGetRaw surfaces an empty body as ok with undefined data", async () => {
     const fetchFn = stubFetch(new Response("", { status: 200 }));
-    configureFetch({ fetchFn });
-    expect(await apiGetRaw("/x")).toEqual({ ok: true, status: 200, data: undefined });
+    const fx = createFetch({ fetchFn });
+    expect(await fx.apiGetRaw("/x")).toEqual({ ok: true, status: 200, data: undefined });
   });
 });
