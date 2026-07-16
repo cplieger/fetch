@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createFetch, apiGet, type FetchInstance } from "./instance.js";
-import { configureFetch, resetFetchConfig } from "./config.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { createFetch, type FetchInstance } from "./instance.js";
+import type { FetchConfig } from "./types.js";
 
 function stubFetch(res: Response): typeof fetch {
   return vi.fn().mockResolvedValue(res) as unknown as typeof fetch;
@@ -10,9 +10,6 @@ function urlOf(fn: typeof fetch): string {
   return (fn as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]![0];
 }
 
-beforeEach(() => {
-  resetFetchConfig();
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -31,46 +28,11 @@ describe("createFetch — instance isolation", () => {
     expect(fb).toHaveBeenCalledTimes(1);
   });
 
-  it("does not leak config between an instance and the module-global default", async () => {
-    const fInst = stubFetch(new Response("{}", { status: 200 }));
-    const fDefault = stubFetch(new Response("{}", { status: 200 }));
-    const inst = createFetch({ baseUrl: "https://inst.test", fetchFn: fInst });
-    // Configuring the default AFTER the instance exists must not touch it.
-    configureFetch({ baseUrl: "https://default.test", fetchFn: fDefault });
-    await inst.apiGet("/x");
-    await apiGet("/y");
-    expect(urlOf(fInst)).toBe("https://inst.test/x");
-    expect(urlOf(fDefault)).toBe("https://default.test/y");
-    expect(fInst).toHaveBeenCalledTimes(1);
-    expect(fDefault).toHaveBeenCalledTimes(1);
-  });
-
-  it("configure() shallow-merges into an instance (baseUrl retained)", async () => {
-    const f = stubFetch(new Response("{}", { status: 200 }));
-    const inst = createFetch({ baseUrl: "https://c.test" });
-    inst.configure({ fetchFn: f });
-    await inst.apiGet("/x");
-    expect(urlOf(f)).toBe("https://c.test/x");
-  });
-
-  it("reads config per call, so a later configure() is reflected", async () => {
-    const f1 = stubFetch(new Response("{}", { status: 200 }));
-    const f2 = stubFetch(new Response("{}", { status: 200 }));
-    const inst = createFetch({ baseUrl: "https://d.test", fetchFn: f1 });
-    await inst.apiGet("/first");
-    inst.configure({ fetchFn: f2 });
-    await inst.apiGet("/second");
-    expect(f1).toHaveBeenCalledTimes(1);
-    expect(f2).toHaveBeenCalledTimes(1);
-    expect(urlOf(f2)).toBe("https://d.test/second");
-  });
-
-  it("exposes requestRaw, request, configure, and all 12 verb helpers", () => {
+  it("exposes requestRaw, request, and all 12 verb helpers", () => {
     const inst = createFetch();
     const keys = [
       "requestRaw",
       "request",
-      "configure",
       "apiGet",
       "apiPost",
       "apiPut",
@@ -100,5 +62,39 @@ describe("createFetch — instance isolation", () => {
     expect(raw).toEqual({ ok: true, status: 200, data: { a: 1 } });
     const data = await inst.apiGet<{ a: number }>("/x");
     expect(data).toEqual({ a: 1 });
+  });
+});
+
+describe("createFetch — config immutability", () => {
+  it("captures a shallow copy: mutating the caller's config object later has no effect", async () => {
+    const f1 = stubFetch(new Response("{}", { status: 200 }));
+    const cfg: FetchConfig = { baseUrl: "https://before.test", fetchFn: f1 };
+    const inst = createFetch(cfg);
+    // Caller mutates their own object after construction — must not leak in.
+    cfg.baseUrl = "https://after.test";
+    await inst.apiGet("/x");
+    expect(urlOf(f1)).toBe("https://before.test/x");
+  });
+
+  it("has no configure method — config is fixed at construction", () => {
+    const inst = createFetch();
+    expect((inst as unknown as Record<string, unknown>)["configure"]).toBeUndefined();
+  });
+
+  it("reads late-bound state through the prepareHeaders hook (the supported pattern)", async () => {
+    const f = stubFetch(new Response("{}", { status: 200 }));
+    let token: string | undefined = undefined;
+    const inst = createFetch({
+      fetchFn: f,
+      prepareHeaders: (headers) => {
+        if (token !== undefined) {
+          headers.set("Authorization", `Bearer ${token}`);
+        }
+      },
+    });
+    token = "tok-later";
+    await inst.apiGet("/x");
+    const init = (f as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]![1];
+    expect((init.headers as Headers).get("authorization")).toBe("Bearer tok-later");
   });
 });

@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { configureFetch, resetFetchConfig } from "./config.js";
-import { request, requestRaw } from "./instance.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { createFetch } from "./instance.js";
 import type { Decoder } from "./types.js";
 
 /** Build a stub fetch that always resolves to the given Response. */
@@ -15,9 +14,6 @@ function callArgs(fn: typeof fetch): [string, RequestInit] {
   return calls[0]!;
 }
 
-beforeEach(() => {
-  resetFetchConfig();
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -25,8 +21,8 @@ afterEach(() => {
 describe("requestRaw — happy paths", () => {
   it("GET returns parsed JSON with ok + status", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ name: "foo" }), { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw<{ name: string }>("GET", "/items/1");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw<{ name: string }>("GET", "/items/1");
     expect(r).toEqual({ ok: true, status: 200, data: { name: "foo" } });
     const [url, init] = callArgs(fetchFn);
     expect(url).toBe("/items/1");
@@ -36,8 +32,8 @@ describe("requestRaw — happy paths", () => {
 
   it("POST encodes the JSON body and sets Content-Type", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ id: 7 }), { status: 201 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw<{ id: number }>("POST", "/items", { body: { name: "bar" } });
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw<{ id: number }>("POST", "/items", { body: { name: "bar" } });
     expect(r).toEqual({ ok: true, status: 201, data: { id: 7 } });
     const [, init] = callArgs(fetchFn);
     expect(init.method).toBe("POST");
@@ -48,8 +44,8 @@ describe("requestRaw — happy paths", () => {
   it("PUT and PATCH also encode the body and set Content-Type", async () => {
     for (const method of ["PUT", "PATCH"] as const) {
       const fetchFn = stubFetch(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
-      configureFetch({ fetchFn });
-      await requestRaw(method, "/items/1", { body: { v: 2 } });
+      const fx = createFetch({ fetchFn });
+      await fx.requestRaw(method, "/items/1", { body: { v: 2 } });
       const [, init] = callArgs(fetchFn);
       expect(init.method).toBe(method);
       expect(init.body).toBe(JSON.stringify({ v: 2 }));
@@ -59,8 +55,8 @@ describe("requestRaw — happy paths", () => {
 
   it("DELETE with no body sends no Content-Type", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ deleted: true }), { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw<{ deleted: boolean }>("DELETE", "/items/1");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw<{ deleted: boolean }>("DELETE", "/items/1");
     expect(r).toEqual({ ok: true, status: 200, data: { deleted: true } });
     const [, init] = callArgs(fetchFn);
     expect(init.body).toBeUndefined();
@@ -69,8 +65,8 @@ describe("requestRaw — happy paths", () => {
 
   it("POST without a body sets no Content-Type", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
-    configureFetch({ fetchFn });
-    await requestRaw("POST", "/ping");
+    const fx = createFetch({ fetchFn });
+    await fx.requestRaw("POST", "/ping");
     const [, init] = callArgs(fetchFn);
     expect(init.body).toBeUndefined();
     expect((init.headers as Headers).get("content-type")).toBeNull();
@@ -80,20 +76,26 @@ describe("requestRaw — happy paths", () => {
 describe("requestRaw — empty bodies", () => {
   it("204 resolves to ok with undefined data (no parse)", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("DELETE", "/items/1");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("DELETE", "/items/1");
     expect(r).toEqual({ ok: true, status: 204, data: undefined });
   });
 
   it("empty 200 body resolves to ok with undefined data", async () => {
     const fetchFn = stubFetch(new Response("", { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/empty");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/empty");
     expect(r).toEqual({ ok: true, status: 200, data: undefined });
   });
 });
 
 describe("requestRaw — non-2xx responses", () => {
+  /** Strip the headers field so envelope-shape assertions stay exact. */
+  function withoutHeaders(r: unknown): unknown {
+    const { headers: _headers, ...rest } = r as Record<string, unknown>;
+    return rest;
+  }
+
   it("lifts error, code, and request_id from a JSON error body", async () => {
     const fetchFn = stubFetch(
       new Response(
@@ -103,9 +105,9 @@ describe("requestRaw — non-2xx responses", () => {
         },
       ),
     );
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/missing");
-    expect(r).toEqual({
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/missing");
+    expect(withoutHeaders(r)).toEqual({
       ok: false,
       status: 404,
       error: "Not found",
@@ -118,38 +120,38 @@ describe("requestRaw — non-2xx responses", () => {
     const fetchFn = stubFetch(
       new Response(JSON.stringify({ error: "Boom", requestId: "req-9" }), { status: 500 }),
     );
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r).toMatchObject({ ok: false, status: 500, error: "Boom", requestId: "req-9" });
     expect(r).not.toHaveProperty("code");
   });
 
   it("falls back to `HTTP <status>` for a non-JSON error body", async () => {
     const fetchFn = stubFetch(new Response("<html>oops</html>", { status: 503 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
-    expect(r).toEqual({ ok: false, status: 503, error: "HTTP 503" });
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 503, error: "HTTP 503" });
   });
 
   it("falls back to `HTTP <status>` for an empty error body", async () => {
     const fetchFn = stubFetch(new Response("", { status: 500 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
-    expect(r).toEqual({ ok: false, status: 500, error: "HTTP 500" });
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 500, error: "HTTP 500" });
   });
 
   it("falls back to `HTTP <status>` when the JSON error body has no error field", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ detail: "nope" }), { status: 422 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
-    expect(r).toEqual({ ok: false, status: 422, error: "HTTP 422" });
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 422, error: "HTTP 422" });
   });
 
   it("falls back to `HTTP <status>` when the JSON error body is a bare non-object", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify(42), { status: 400 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
-    expect(r).toEqual({ ok: false, status: 400, error: "HTTP 400" });
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 400, error: "HTTP 400" });
   });
 
   it("prefers snake_case request_id over camelCase requestId when both are present", async () => {
@@ -158,17 +160,114 @@ describe("requestRaw — non-2xx responses", () => {
         status: 500,
       }),
     );
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r).toMatchObject({ ok: false, status: 500, error: "boom", requestId: "snake-1" });
+  });
+});
+
+describe("requestRaw — error-response headers", () => {
+  it("carries the response headers on a non-2xx error envelope", async () => {
+    const fetchFn = stubFetch(
+      new Response(JSON.stringify({ error: "slow down" }), {
+        status: 429,
+        headers: { "Retry-After": "30" },
+      }),
+    );
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/login");
+    expect(r.ok).toBe(false);
+    if (r.ok) {
+      return;
+    }
+    expect(r.status).toBe(429);
+    expect(r.headers).toBeInstanceOf(Headers);
+    expect(r.headers?.get("Retry-After")).toBe("30");
+  });
+
+  it("carries the response headers on a 2xx decode failure", async () => {
+    const fetchFn = stubFetch(
+      new Response("not json{", { status: 200, headers: { "X-Trace": "t-1" } }),
+    );
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r.ok).toBe(false);
+    if (r.ok) {
+      return;
+    }
+    expect(r.code).toBe("decode");
+    expect(r.headers?.get("X-Trace")).toBe("t-1");
+  });
+
+  it("carries the response headers on a decoder shape mismatch", async () => {
+    const decoder: Decoder<unknown> = () => {
+      throw new Error("bad shape");
+    };
+    const fetchFn = stubFetch(
+      new Response(JSON.stringify({}), { status: 200, headers: { "X-Trace": "t-2" } }),
+    );
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x", { decoder });
+    expect(r.ok).toBe(false);
+    if (r.ok) {
+      return;
+    }
+    expect(r.code).toBe("decode");
+    expect(r.headers?.get("X-Trace")).toBe("t-2");
+  });
+
+  it("omits headers on a network failure (no response received)", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValue(new TypeError("Failed to fetch")) as unknown as typeof fetch;
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r.ok).toBe(false);
+    expect(r).not.toHaveProperty("headers");
+  });
+});
+
+describe("requestRaw — ignoreBody", () => {
+  it("resolves ok with undefined data without parsing a non-JSON 2xx body", async () => {
+    const fetchFn = stubFetch(new Response("plain text, not json", { status: 200 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("DELETE", "/items/1", { ignoreBody: true });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined });
+  });
+
+  it("does not invoke a supplied decoder", async () => {
+    const decoder = vi.fn(() => {
+      throw new Error("must not run");
+    });
+    const fetchFn = stubFetch(new Response(JSON.stringify({ a: 1 }), { status: 200 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x", { decoder, ignoreBody: true });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined });
+    expect(decoder).not.toHaveBeenCalled();
+  });
+
+  it("still parses the error envelope on a non-2xx response", async () => {
+    const fetchFn = stubFetch(
+      new Response(JSON.stringify({ error: "nope", code: "denied" }), { status: 403 }),
+    );
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("DELETE", "/x", { ignoreBody: true });
+    expect(r).toMatchObject({ ok: false, status: 403, error: "nope", code: "denied" });
+  });
+
+  it("null-collapses to null through request()", async () => {
+    const fetchFn = stubFetch(new Response("anything", { status: 200 }));
+    const fx = createFetch({ fetchFn });
+    const data = await fx.request("DELETE", "/x", { ignoreBody: true });
+    expect(data).toBeNull();
   });
 });
 
 describe("requestRaw — decoding", () => {
   it("returns parsed data when no decoder is supplied", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify([1, 2, 3]), { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw<number[]>("GET", "/nums");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw<number[]>("GET", "/nums");
     expect(r).toEqual({ ok: true, status: 200, data: [1, 2, 3] });
   });
 
@@ -180,8 +279,8 @@ describe("requestRaw — decoding", () => {
       return v as { n: number };
     };
     const fetchFn = stubFetch(new Response(JSON.stringify({ n: 5 }), { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/n", { decoder });
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/n", { decoder });
     expect(r).toEqual({ ok: true, status: 200, data: { n: 5 } });
   });
 
@@ -190,9 +289,9 @@ describe("requestRaw — decoding", () => {
       throw new Error("expected { n: number }");
     };
     const fetchFn = stubFetch(new Response(JSON.stringify({ wrong: true }), { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/n", { decoder });
-    expect(r).toEqual({
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/n", { decoder });
+    expect(r).toMatchObject({
       ok: false,
       status: 200,
       code: "decode",
@@ -205,9 +304,9 @@ describe("requestRaw — decoding", () => {
       throw "raw failure";
     };
     const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/n", { decoder });
-    expect(r).toEqual({
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/n", { decoder });
+    expect(r).toMatchObject({
       ok: false,
       status: 200,
       code: "decode",
@@ -220,9 +319,9 @@ describe("requestRaw — decoding", () => {
       throw { weird: true };
     };
     const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/n", { decoder });
-    expect(r).toEqual({
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/n", { decoder });
+    expect(r).toMatchObject({
       ok: false,
       status: 200,
       code: "decode",
@@ -232,8 +331,8 @@ describe("requestRaw — decoding", () => {
 
   it("maps a JSON.parse failure to code 'decode'", async () => {
     const fetchFn = stubFetch(new Response("not json{", { status: 200 }));
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/n");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/n");
     expect(r.ok).toBe(false);
     expect((r as { code?: string }).code).toBe("decode");
     expect((r as { error: string }).error).toContain("response not JSON:");
@@ -246,8 +345,8 @@ describe("requestRaw — thrown fetch errors", () => {
     const fetchFn = vi
       .fn()
       .mockRejectedValue(new TypeError("Failed to fetch")) as unknown as typeof fetch;
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r).toEqual({ ok: false, status: 0, code: "network", error: "Failed to fetch" });
   });
 
@@ -257,8 +356,8 @@ describe("requestRaw — thrown fetch errors", () => {
       .mockRejectedValue(
         new DOMException("The operation timed out", "TimeoutError"),
       ) as unknown as typeof fetch;
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r).toEqual({ ok: false, status: 0, code: "timeout", error: "The operation timed out" });
   });
 
@@ -266,8 +365,8 @@ describe("requestRaw — thrown fetch errors", () => {
     const fetchFn = vi
       .fn()
       .mockRejectedValue(new DOMException("aborted", "AbortError")) as unknown as typeof fetch;
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r).toEqual({ ok: false, status: 0, code: "timeout", error: "aborted" });
   });
 
@@ -277,17 +376,17 @@ describe("requestRaw — thrown fetch errors", () => {
       .mockRejectedValue(
         new DOMException("The operation was aborted", "AbortError"),
       ) as unknown as typeof fetch;
-    configureFetch({ fetchFn });
+    const fx = createFetch({ fetchFn });
     const ac = new AbortController();
     ac.abort();
-    const r = await requestRaw("GET", "/x", { signal: ac.signal });
+    const r = await fx.requestRaw("GET", "/x", { signal: ac.signal });
     expect(r).toEqual({ ok: false, status: 0, code: "cancelled", error: "request cancelled" });
   });
 
   it("never throws — a fetch resolving to null is classified, not propagated", async () => {
     const fetchFn = (async () => null) as unknown as typeof fetch;
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r.ok).toBe(false);
     expect((r as { code?: string }).code).toBe("network");
   });
@@ -296,37 +395,37 @@ describe("requestRaw — thrown fetch errors", () => {
 describe("request — null collapsing", () => {
   it("returns data on ok", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ a: 1 }), { status: 200 }));
-    configureFetch({ fetchFn });
-    const data = await request<{ a: number }>("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const data = await fx.request<{ a: number }>("GET", "/x");
     expect(data).toEqual({ a: 1 });
   });
 
   it("returns null on error", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ error: "no" }), { status: 400 }));
-    configureFetch({ fetchFn });
-    const data = await request("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const data = await fx.request("GET", "/x");
     expect(data).toBeNull();
   });
 
   it("returns null (not undefined) on a 204 success — empty body collapses", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
-    configureFetch({ fetchFn });
-    const data = await request("DELETE", "/x");
+    const fx = createFetch({ fetchFn });
+    const data = await fx.request("DELETE", "/x");
     expect(data).toBeNull();
   });
 
   it("returns null on an empty 200 body", async () => {
     const fetchFn = stubFetch(new Response("", { status: 200 }));
-    configureFetch({ fetchFn });
-    const data = await request("GET", "/empty");
+    const fx = createFetch({ fetchFn });
+    const data = await fx.request("GET", "/empty");
     expect(data).toBeNull();
   });
 
   it("passes a JSON null / 0 / false / '' body through as real data", async () => {
     for (const raw of ["null", "0", "false", '""'] as const) {
       const fetchFn = stubFetch(new Response(raw, { status: 200 }));
-      configureFetch({ fetchFn });
-      const r = await requestRaw("GET", "/x");
+      const fx = createFetch({ fetchFn });
+      const r = await fx.requestRaw("GET", "/x");
       expect(r).toEqual({ ok: true, status: 200, data: JSON.parse(raw) as unknown });
     }
   });
@@ -338,8 +437,8 @@ describe("request — null collapsing", () => {
       ['""', ""],
     ] as const) {
       const fetchFn = stubFetch(new Response(raw, { status: 200 }));
-      configureFetch({ fetchFn });
-      const data = await request<number | boolean | string>("GET", "/x");
+      const fx = createFetch({ fetchFn });
+      const data = await fx.request<number | boolean | string>("GET", "/x");
       expect(data).toBe(want);
     }
   });
@@ -351,7 +450,8 @@ describe("request — global fetch fallback", () => {
       .fn()
       .mockResolvedValue(new Response(JSON.stringify({ g: true }), { status: 200 }));
     vi.stubGlobal("fetch", globalFetch);
-    const data = await request<{ g: boolean }>("GET", "/x");
+    const fx = createFetch();
+    const data = await fx.request<{ g: boolean }>("GET", "/x");
     expect(globalFetch).toHaveBeenCalledTimes(1);
     expect(data).toEqual({ g: true });
   });
@@ -360,8 +460,8 @@ describe("request — global fetch fallback", () => {
 describe("requestRaw — buggy fetchFn results are classified, never thrown", () => {
   it("coerces status to 0 for a truthy non-Response ({ ok: false })", async () => {
     const fetchFn = (async () => ({ ok: false })) as unknown as typeof fetch;
-    configureFetch({ fetchFn });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r.ok).toBe(false);
     expect((r as { status: number }).status).toBe(0);
   });
@@ -372,8 +472,8 @@ describe("requestRaw — buggy fetchFn results are classified, never thrown", ()
       status: "200",
       text: async () => JSON.stringify({ a: 1 }),
     })) as unknown as typeof fetch;
-    configureFetch({ fetchFn });
-    const r = await requestRaw<{ a: number }>("GET", "/x");
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw<{ a: number }>("GET", "/x");
     expect(r).toEqual({ ok: true, status: 0, data: { a: 1 } });
   });
 });
@@ -381,8 +481,8 @@ describe("requestRaw — buggy fetchFn results are classified, never thrown", ()
 describe("requestRaw — null request bodies", () => {
   it("sends neither payload nor Content-Type for a null body", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({}), { status: 200 }));
-    configureFetch({ fetchFn });
-    await requestRaw("POST", "/x", { body: null });
+    const fx = createFetch({ fetchFn });
+    await fx.requestRaw("POST", "/x", { body: null });
     const [, init] = callArgs(fetchFn);
     expect(init.body).toBeUndefined();
     expect((init.headers as Headers).get("content-type")).toBeNull();
@@ -392,9 +492,9 @@ describe("requestRaw — null request bodies", () => {
 describe("requestRaw — caller signal + timeout composition", () => {
   it("composes the caller signal with the timeout and still resolves ok", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ v: 1 }), { status: 200 }));
-    configureFetch({ fetchFn });
+    const fx = createFetch({ fetchFn });
     const ac = new AbortController();
-    const r = await requestRaw("GET", "/x", { signal: ac.signal });
+    const r = await fx.requestRaw("GET", "/x", { signal: ac.signal });
     expect(r).toEqual({ ok: true, status: 200, data: { v: 1 } });
     const [, init] = callArgs(fetchFn);
     expect(init.signal).toBeInstanceOf(AbortSignal);
@@ -410,8 +510,8 @@ describe("requestRaw — maxResponseBytes", () => {
         headers: { "content-length": "7" },
       }),
     );
-    configureFetch({ fetchFn, maxResponseBytes: 3 });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn, maxResponseBytes: 3 });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r).toEqual({
       ok: false,
       status: 0,
@@ -434,8 +534,8 @@ describe("requestRaw — maxResponseBytes", () => {
       },
     });
     const fetchFn = stubFetch(new Response(body, { status: 200 }));
-    configureFetch({ fetchFn, maxResponseBytes: 5 });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn, maxResponseBytes: 5 });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r).toEqual({
       ok: false,
       status: 0,
@@ -446,8 +546,8 @@ describe("requestRaw — maxResponseBytes", () => {
 
   it("parses a response that stays within the configured cap", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    configureFetch({ fetchFn, maxResponseBytes: 20 });
-    const r = await requestRaw<{ ok: boolean }>("GET", "/x");
+    const fx = createFetch({ fetchFn, maxResponseBytes: 20 });
+    const r = await fx.requestRaw<{ ok: boolean }>("GET", "/x");
     expect(r).toEqual({ ok: true, status: 200, data: { ok: true } });
   });
 
@@ -458,15 +558,15 @@ describe("requestRaw — maxResponseBytes", () => {
         headers: { "content-length": "36" },
       }),
     );
-    configureFetch({ fetchFn, maxResponseBytes: 8 });
-    const r = await requestRaw("GET", "/x");
-    expect(r).toEqual({ ok: false, status: 413, error: "HTTP 413" });
+    const fx = createFetch({ fetchFn, maxResponseBytes: 8 });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 413, error: "HTTP 413" });
   });
 
   it("reads a null-body 2xx via res.text() when a cap is set", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 200 }));
-    configureFetch({ fetchFn, maxResponseBytes: 16 });
-    const r = await requestRaw("GET", "/x");
+    const fx = createFetch({ fetchFn, maxResponseBytes: 16 });
+    const r = await fx.requestRaw("GET", "/x");
     expect(r).toEqual({ ok: true, status: 200, data: undefined });
   });
 
@@ -474,8 +574,8 @@ describe("requestRaw — maxResponseBytes", () => {
     const fetchFn = stubFetch(
       new Response("[1,2]", { status: 200, headers: { "content-length": "5" } }),
     );
-    configureFetch({ fetchFn, maxResponseBytes: 5 });
-    const r = await requestRaw<number[]>("GET", "/x");
+    const fx = createFetch({ fetchFn, maxResponseBytes: 5 });
+    const r = await fx.requestRaw<number[]>("GET", "/x");
     expect(r).toEqual({ ok: true, status: 200, data: [1, 2] });
   });
 
@@ -492,8 +592,8 @@ describe("requestRaw — maxResponseBytes", () => {
       },
     });
     const fetchFn = stubFetch(new Response(body, { status: 200 }));
-    configureFetch({ fetchFn, maxResponseBytes: 5 });
-    const r = await requestRaw<number[]>("GET", "/x");
+    const fx = createFetch({ fetchFn, maxResponseBytes: 5 });
+    const r = await fx.requestRaw<number[]>("GET", "/x");
     expect(r).toEqual({ ok: true, status: 200, data: [1, 2] });
   });
 });

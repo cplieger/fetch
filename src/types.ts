@@ -15,6 +15,40 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  */
 export type Decoder<T> = (value: unknown) => T;
 
+/** Configuration for a fetch instance. Captured immutably by
+ *  {@link createFetch} (shallow-copied and frozen at construction); a changed
+ *  backend produces a new instance. An injection seam modelled on RTK's
+ *  fetchBaseQuery: baseUrl, credentials, a header-preparation hook, and a
+ *  custom fetch implementation for tests / SSR. */
+export interface FetchConfig {
+  /** Prepended to relative paths. The trailing `/` is stripped and a leading
+   *  `/` is ensured on the path before joining.
+   *
+   *  CONTRACT: `path` is treated as a RELATIVE path. With `baseUrl` set, the
+   *  configured scheme+host always precede it, so an absolute (`https://…`) or
+   *  protocol-relative (`//host`) path is neutralised (kept as a path segment)
+   *  and cannot override the origin. With `baseUrl` UNSET, `path` is passed to
+   *  `fetch()` verbatim — the caller owns the full URL and must never pass
+   *  untrusted input as the whole path. */
+  baseUrl?: string;
+  /** `RequestInit.credentials` mode applied to every request (e.g. `"include"`
+   *  for cookies). */
+  credentials?: RequestCredentials;
+  /** Custom fetch implementation. Useful for SSR (isomorphic fetch) or tests. */
+  fetchFn?: typeof fetch;
+  /** Inject headers on every request. Mutate the provided instance and/or
+   *  return a replacement (RTK convention: a returned `Headers` wins wholesale,
+   *  otherwise the mutated instance is used). May be async (e.g. to read a
+   *  token store) — read late-bound state (a token set after boot) from inside
+   *  the hook rather than reconfiguring the instance. */
+  prepareHeaders?: (headers: Headers) => Headers | undefined | Promise<Headers | undefined>;
+  /** Optional cap on the response body size in bytes. Unset means unlimited
+   *  (the current behavior). When set, a larger body is rejected instead of
+   *  buffered; a defense-in-depth guard for the SSR/Node path against a
+   *  hostile upstream. */
+  maxResponseBytes?: number;
+}
+
 /** Successful result envelope. */
 export interface ApiOk<T> {
   readonly ok: true;
@@ -51,6 +85,14 @@ export interface ApiErr {
   readonly code?: string;
   /** Lifted from the error body's `request_id` / `requestId`, when present. */
   readonly requestId?: string;
+  /** Response headers, present only when an HTTP response was actually
+   *  received: a non-2xx error, or a 2xx whose body failed decoding (both
+   *  carry a real `status > 0`). Absent on network / timeout / cancelled /
+   *  invalid failures, which have no response. Lets a caller read
+   *  error-response diagnostics (e.g. `Retry-After` on a 429) without leaving
+   *  the envelope. Success responses deliberately do not carry headers —
+   *  drop to raw `fetch` for full response-metadata access. */
+  readonly headers?: Headers;
 }
 
 /** Discriminated union returned by `requestRaw` and the `*Raw` verb helpers. */
@@ -68,6 +110,12 @@ export interface RequestOptions<T = unknown> {
   decoder?: Decoder<T>;
   /** Overrides the default request timeout (`API_TIMEOUT_MS`) for this request. */
   timeoutMs?: number;
+  /** Skip reading a 2xx response body entirely: the request resolves ok with
+   *  `data: undefined` (`null` after null-collapsing) and any `decoder` is not
+   *  invoked. Non-2xx error bodies are still parsed for the error envelope.
+   *  For endpoints whose success body is irrelevant or non-JSON (e.g. a
+   *  DELETE answering plain text). */
+  ignoreBody?: boolean;
 }
 
 /** The non-throwing request core signature: always resolves to an
