@@ -11,33 +11,25 @@ The library is a handful of small, single-purpose modules under `src/`, each
 paired with a colocated `*.test.ts`:
 
 - `types.ts` — pure types, no imports, no runtime: `HttpMethod`, `Decoder`,
-  `ApiOk` / `ApiErr` / `ApiResult`, `RequestOptions`. Any module may depend on
-  it.
+  `FetchConfig`, `ApiOk` / `ApiErr` / `ApiResult`, `RequestOptions`. Any module
+  may depend on it.
 - `timeout.ts` — `withTimeout` (composes a caller signal with
   `AbortSignal.timeout` via `AbortSignal.any`) and the `API_TIMEOUT_MS`
-  default.
-- `config.ts` — `configureFetch` / `resetFetchConfig` / `getFetchConfig`, the
-  `FetchConfig` shape, and `createConfigStore` (the isolated config holder). A
-  module-global injection seam (baseUrl, credentials, a `prepareHeaders` hook,
-  a custom `fetchFn`) modelled on RTK's `fetchBaseQuery`; the default surface is
-  one `createConfigStore()` instance and `configureFetch` shallow-merges into
-  it, so successive calls accumulate.
-- `request.ts` — the core. `makeRequestRaw(getConfig)` builds a config-bound
-  `requestRaw` (builds the request, runs the fetch, resolves to an `ApiResult`);
-  `makeRequest` wraps it into the null-collapsing `request`. These are
-  config-parametrized factories; the default-instance `requestRaw` /
-  `request` bindings are assembled in `instance.ts`.
+  default. The toolkit's single timeout-composition implementation;
+  `@cplieger/actions` imports it from here.
+- `request.ts` — the core. `makeRequestRaw(cfg)` builds a config-bound
+  `requestRaw` (builds the request, runs the fetch, resolves to an `ApiResult`)
+  over an immutable `FetchConfig`; `makeRequest` wraps it into the
+  null-collapsing `request`. These are config-parametrized factories, assembled
+  per instance in `instance.ts`.
 - `verbs.ts` — `makeVerbs(request, requestRaw)` builds the 12 thin per-verb
-  helpers (`apiGet`, `apiGetRaw`, `apiGetTyped`, …) bound to a request pair; the
-  default-instance verb bindings are assembled in `instance.ts`.
-- `instance.ts` — the single instance-assembly site. An internal
-  `buildInstance(store)` composes a `ConfigStore` with `makeRequestRaw` /
+  helpers (`apiGet`, `apiGetRaw`, `apiGetTyped`, …) bound to a request pair.
+- `instance.ts` — the single assembly site. `createFetch(config?)`
+  shallow-copies and freezes the config, then composes `makeRequestRaw` /
   `makeRequest` / `makeVerbs` into a `FetchInstance` (its own `requestRaw` /
-  `request` / 12 verbs / `configure`). `createFetch(initialConfig?)` builds one
-  over a fresh isolated `createConfigStore`, so multiple origins /
-  credential-sets can coexist without the module-global default; the default
-  surface (the top-level `requestRaw` / `request` / `apiGet` … re-exported by
-  `index.ts`) is the same `buildInstance` over the shared `defaultStore`.
+  `request` / 12 verbs). Instances are the only configuration surface: two
+  instances share nothing, there is no module-global default, and a changed
+  backend produces a new instance.
 
 The public API is whatever `src/index.ts` re-exports — that file is the
 contract. Update it deliberately, and keep the README `## API` section in sync.
@@ -57,7 +49,10 @@ contract. Update it deliberately, and keep the README `## API` section in sync.
 - **Status `0` means a pre-response failure.** `network`, `timeout`,
   `cancelled`, and the build-phase `invalid` errors all carry `status: 0`; a
   lifted server error carries the real HTTP status, and a `decode` error carries
-  the real 2xx status.
+  the real 2xx status. `ApiErr.headers` follows the same line: present exactly
+  when a real HTTP response was received (any non-2xx, or a 2xx decode
+  failure), absent on every status-0 failure. Success envelopes never carry
+  headers.
 - **The relative-path contract.** With `baseUrl` set, the base scheme+host
   always precede `path` (one slash at the join, no origin override); with
   `baseUrl` unset, `path` is passed to `fetch()` verbatim. See the README path
@@ -66,12 +61,16 @@ contract. Update it deliberately, and keep the README `## API` section in sync.
   stays empty — everything is built on the platform `fetch` / `Headers` /
   `AbortSignal`. Decoder combinators and a retry/interceptor layer are
   [out of scope](README.md#unsupported-by-design); do not add them here.
-- **The default surface stays byte-compatible.** The top-level `apiGet` / … /
-  `configureFetch` (and the `@internal` `resetFetchConfig` / `getFetchConfig`)
-  delegate to a module-global default instance and must keep their exact
-  signatures and behavior. `createFetch` is additive **beside** them, never a
-  replacement; the existing default-surface tests pin this, so an instance
-  feature must not change how the default behaves.
+- **Config is immutable and instance-scoped.** `createFetch` shallow-copies and
+  freezes its config; there is no module-global default, no post-construction
+  mutation, and no `configure` method. Do not reintroduce any of them (the v1
+  global surface was deliberately removed in v2): a changed backend is a new
+  instance, and late-bound per-request state (a token acquired after boot)
+  belongs inside the `prepareHeaders` hook, which runs on every call.
+- **Neutralize, not reject.** The path contract defuses navigation syntax and
+  still sends the request; a pre-network `code: "invalid"` rejection was
+  evaluated and declined (see the README design note). Do not re-propose it
+  without a real cross-origin consumer.
 
 ## Public API surface
 
@@ -118,9 +117,9 @@ type`, `eqeqeq`, `curly`, `prefer-const`. Prefix deliberately unused names
   with `_`.
 - **Tests are colocated** as `src/**/*.test.ts` (the only pattern vitest
   includes), with the property suite in `src/*.property.test.ts` via
-  `fast-check`. Reset the module-global config with `resetFetchConfig()` in
-  `beforeEach`, and drive requests through an injected `configureFetch({
-fetchFn })` stub rather than hitting the network.
+  `fast-check`. Build a fresh `createFetch({ fetchFn })` instance per test with
+  a stubbed `fetchFn` rather than hitting the network — instances share
+  nothing, so there is no global state to reset between tests.
 - **DOM tests** run under `happy-dom` (via the `// @vitest-environment
 happy-dom` pragma), so `Response` / `Headers` / `AbortSignal` are available in
   tests without a browser.
