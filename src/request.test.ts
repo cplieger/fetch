@@ -113,7 +113,41 @@ describe("requestRaw — non-2xx responses", () => {
       error: "Not found",
       code: "not_found",
       requestId: "req-42",
+      body: { error: "Not found", code: "not_found", request_id: "req-42" },
     });
+  });
+
+  it("carries the parsed JSON error body on ApiErr.body", async () => {
+    const envelope = { code: "has_dependents", dependents: ["job-a", "job-b"] };
+    const fetchFn = stubFetch(new Response(JSON.stringify(envelope), { status: 409 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("DELETE", "/tools/x");
+    expect(r).toMatchObject({ ok: false, status: 409, code: "has_dependents" });
+    expect((r as { body?: unknown }).body).toEqual(envelope);
+  });
+
+  it("carries a bare non-object JSON error body on ApiErr.body", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify(42), { status: 400 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 400, error: "HTTP 400" });
+    expect((r as { body?: unknown }).body).toBe(42);
+  });
+
+  it("omits ApiErr.body for a non-JSON error body", async () => {
+    const fetchFn = stubFetch(new Response("<html>oops</html>", { status: 503 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 503 });
+    expect(r).not.toHaveProperty("body");
+  });
+
+  it("omits ApiErr.body for an empty error body", async () => {
+    const fetchFn = stubFetch(new Response("", { status: 500 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toMatchObject({ ok: false, status: 500 });
+    expect(r).not.toHaveProperty("body");
   });
 
   it("accepts a camelCase requestId field", async () => {
@@ -214,6 +248,31 @@ describe("requestRaw — error-response headers", () => {
     }
     expect(r.code).toBe("decode");
     expect(r.headers?.get("X-Trace")).toBe("t-2");
+  });
+
+  it("carries the parsed body on a decoder shape mismatch", async () => {
+    const decoder: Decoder<unknown> = () => {
+      throw new Error("bad shape");
+    };
+    const fetchFn = stubFetch(new Response(JSON.stringify({ n: "not-a-number" }), { status: 200 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x", { decoder });
+    expect(r.ok).toBe(false);
+    if (r.ok) {
+      return;
+    }
+    expect(r.code).toBe("decode");
+    expect(r.body).toEqual({ n: "not-a-number" });
+  });
+
+  it("omits body on a network failure (no response received)", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValue(new TypeError("Failed to fetch")) as unknown as typeof fetch;
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r.ok).toBe(false);
+    expect(r).not.toHaveProperty("body");
   });
 
   it("omits headers on a network failure (no response received)", async () => {

@@ -38,13 +38,15 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /** Build an ApiErr, omitting optional fields when absent (exactOptionalPropertyTypes).
  *  `headers` is passed only where a real HTTP response exists (non-2xx or a
- *  2xx decode failure), per the ApiErr.headers contract. */
+ *  2xx decode failure), per the ApiErr.headers contract. `body` is passed only
+ *  where that response carried parseable JSON, per the ApiErr.body contract. */
 function makeErr(
   status: number,
   error: string,
   code?: string,
   requestId?: string,
   headers?: Headers,
+  body?: unknown,
 ): ApiErr {
   const err: {
     ok: false;
@@ -53,6 +55,7 @@ function makeErr(
     code?: string;
     requestId?: string;
     headers?: Headers;
+    body?: unknown;
   } = {
     ok: false,
     status,
@@ -66,6 +69,9 @@ function makeErr(
   }
   if (headers !== undefined) {
     err.headers = headers;
+  }
+  if (body !== undefined) {
+    err.body = body;
   }
   return err;
 }
@@ -237,26 +243,28 @@ async function parseErrorResponse(res: Response, max: number | undefined): Promi
   let error = `HTTP ${status}`;
   let code: string | undefined;
   let requestId: string | undefined;
+  let parsed: unknown;
   try {
-    const body: unknown = JSON.parse(await readBounded(res, max));
-    if (isRecord(body)) {
-      const errField = body["error"];
+    parsed = JSON.parse(await readBounded(res, max));
+    if (isRecord(parsed)) {
+      const errField = parsed["error"];
       if (typeof errField === "string") {
         error = errField;
       }
-      const codeField = body["code"];
+      const codeField = parsed["code"];
       if (typeof codeField === "string") {
         code = codeField;
       }
-      const ridField = body["request_id"] ?? body["requestId"];
+      const ridField = parsed["request_id"] ?? parsed["requestId"];
       if (typeof ridField === "string") {
         requestId = ridField;
       }
     }
   } catch {
-    // Non-JSON / empty error body — keep the `HTTP <status>` fallback.
+    // Non-JSON / empty error body — keep the `HTTP <status>` fallback (and
+    // leave `parsed` undefined so no body field rides the envelope).
   }
-  return makeErr(status, error, code, requestId, res.headers);
+  return makeErr(status, error, code, requestId, res.headers, parsed);
 }
 
 /**
@@ -372,6 +380,7 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
             "decode",
             undefined,
             res.headers,
+            parsed,
           );
         }
       }
