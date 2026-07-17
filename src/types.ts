@@ -85,6 +85,18 @@ export interface ApiErr {
   readonly code?: string;
   /** Lifted from the error body's `request_id` / `requestId`, when present. */
   readonly requestId?: string;
+  /** The parsed JSON body of the failed response, present when a real HTTP
+   *  response carried parseable JSON: a non-2xx (whatever its shape, including
+   *  a bare primitive or `null`), or a 2xx whose `decoder` rejected. Absent on
+   *  network / timeout / cancelled / invalid failures (no response) and on
+   *  non-JSON / empty bodies. Lets a caller consume a meaningful error
+   *  envelope (e.g. a 409 whose body carries conflict details) without
+   *  leaving the result union.
+   *
+   *  SECURITY: server-controlled content, same trust level as `error` —
+   *  validate the shape before reading fields, and render any text from it
+   *  via textContent, never innerHTML. */
+  readonly body?: unknown;
   /** Response headers, present only when an HTTP response was actually
    *  received: a non-2xx error, or a 2xx whose body failed decoding (both
    *  carry a real `status > 0`). Absent on network / timeout / cancelled /
