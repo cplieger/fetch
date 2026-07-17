@@ -28,6 +28,11 @@
     "typescript-eslint": "8.64.0",
     "vitest": "4.1.10"
   },
+  "overrides": {
+    "typed-rest-client": {
+      "qs": "6.15.3"
+    }
+  },
   "description": "Small, zero-dependency universal fetch wrapper for TypeScript with typed result envelopes",
   "license": "GPL-3.0-or-later",
   "types": "./src/index.ts",
