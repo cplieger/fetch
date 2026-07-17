@@ -114,6 +114,13 @@ export type ApiResult<T> = ApiOk<T> | ApiErr;
 export interface RequestOptions<T = unknown> {
   /** JSON-encoded for non-GET requests when defined. */
   body?: unknown;
+  /** Pre-encoded request body for non-GET requests, sent as-is with NO JSON
+   *  encoding and NO automatic Content-Type — the caller owns the type via
+   *  `headers` (e.g. a YAML config document with `Content-Type: text/yaml`).
+   *  Mutually exclusive with `body` (both set is a client-side `"invalid"`
+   *  failure). The response side is unchanged: replies still decode through
+   *  the JSON envelope. */
+  rawBody?: BodyInit;
   /** Caller cancellation signal, composed with the request timeout. */
   signal?: AbortSignal;
   /** Per-request headers, merged before the global `prepareHeaders` hook. */
