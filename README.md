@@ -96,7 +96,7 @@ const user = await api.apiGetTyped("/users/me", decodeUser); // { id: string } |
 
 ### Per-request options
 
-Every helper accepts a trailing `RequestOptions`: a caller `AbortSignal`, per-request `headers`, a `decoder`, a `timeoutMs` override (default 30 000 ms), and `ignoreBody`. The caller signal is composed with the request timeout, so whichever fires first aborts the request. The timeout covers the network round-trip only — the instance's `prepareHeaders` hook runs **before** the fetch and is **not** bounded by it, so a hook that may hang (e.g. an async token refresh) must self-bound.
+Every helper accepts a trailing `RequestOptions`: a caller `AbortSignal`, per-request `headers`, a `decoder`, a `timeoutMs` override (default 30 000 ms), `ignoreBody`, and `rawBody` (a pre-encoded `BodyInit` sent as-is — no JSON encoding, no automatic Content-Type; set the type via `headers`; mutually exclusive with `body`). The caller signal is composed with the request timeout, so whichever fires first aborts the request. The timeout covers the network round-trip only — the instance's `prepareHeaders` hook runs **before** the fetch and is **not** bounded by it, so a hook that may hang (e.g. an async token refresh) must self-bound.
 
 ```typescript
 const controller = new AbortController();
@@ -166,7 +166,7 @@ A changed backend produces a new instance (`api = createFetch(nextConfig)`); sta
 - `ApiOk<T>` / `ApiErr` / `ApiResult<T>` — the result envelope union. `ApiErr.headers` carries the response headers whenever a real HTTP response was received (any non-2xx, or a 2xx decode failure); it is absent on network / timeout / cancelled / invalid failures. `ApiErr.body` carries the parsed JSON body of that response when one parsed (a 409 whose body is a meaningful conflict envelope, a decoder mismatch's raw value); absent on non-JSON / empty bodies and on the no-response failures. Treat it as server-controlled input: validate before reading fields, render text from it via `textContent`.
 - `Decoder<T>` — a runtime validator: returns the typed value or throws.
 - `HttpMethod` — `"GET" | "POST" | "PUT" | "PATCH" | "DELETE"`.
-- `RequestOptions<T>` — per-request `body`, `signal`, `headers`, `decoder`, `timeoutMs`, `ignoreBody`.
+- `RequestOptions<T>` — per-request `body`, `rawBody`, `signal`, `headers`, `decoder`, `timeoutMs`, `ignoreBody`.
 
 ## Migrating from v1
 
@@ -179,7 +179,7 @@ v2 removes the module-global config surface; instances are the only topology, an
 | Late-bound token via a later `configure` call     | Read the token inside `prepareHeaders` (runs per request)                 |
 | `resetFetchConfig()` / `getFetchConfig()` (tests) | Build a fresh instance per test — nothing global to reset                 |
 
-The envelope, verb helpers, path contract, timeout composition, and decoder seam are unchanged. New in v2: `ApiErr.headers` (error-response headers) and `RequestOptions.ignoreBody` (skip a 2xx body).
+The envelope, verb helpers, path contract, timeout composition, and decoder seam are unchanged. New in v2: `ApiErr.headers` (error-response headers) and `RequestOptions.ignoreBody` (skip a 2xx body). New in v2.1: `ApiErr.body` (the parsed JSON body of a failed response) and `RequestOptions.rawBody` (pre-encoded request bodies).
 
 ## Unsupported by design
 
@@ -193,7 +193,7 @@ These features are intentionally out of scope. `@cplieger/fetch` is the request/
 | Decoder combinators                                          | Ships only the `Decoder<T>` type and the optional invocation seam. Each app keeps its own validators (hand-written, zod, valibot, …).                                                                                                                 |
 | Response caching / revalidation                              | Out of paradigm — this is a fetch envelope, not a data cache.                                                                                                                                                                                         |
 | Mutable / module-global configuration                        | Config is frozen at `createFetch`. A changed backend is a new instance; late-bound per-request state reads from inside `prepareHeaders`.                                                                                                              |
-| Non-JSON bodies / raw `Response` / success-response metadata | JSON-envelope by design: the request body is JSON-encoded and the response is read as JSON (or empty). Error-path headers ride `ApiErr.headers`; for binary / streaming bodies, success-response header access, or `statusText`, drop to raw `fetch`. |
+| Non-JSON responses / raw `Response` / success-response metadata | The response side is JSON-envelope by design (request bodies may be pre-encoded via `rawBody`). Error-path headers and parsed JSON bodies ride `ApiErr.headers` / `ApiErr.body`; for binary / streaming responses, success-response header access, or `statusText`, drop to raw `fetch`. |
 
 ## Disclaimer
 

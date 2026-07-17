@@ -290,9 +290,16 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
     try {
       callerSignal = opts?.signal;
       const headers = new Headers();
+      if (opts?.rawBody !== undefined && opts.body != null) {
+        throw new TypeError("body and rawBody are mutually exclusive");
+      }
       // A null / undefined body means "no body": send neither payload nor a
       // Content-Type (POSTing a literal JSON `null` is a non-need).
-      if (method !== "GET" && opts?.body != null) {
+      if (method !== "GET" && opts?.rawBody !== undefined) {
+        // Pre-encoded body: sent as-is, no JSON encoding, no automatic
+        // Content-Type — the caller owns the type via headers.
+        init.body = opts.rawBody;
+      } else if (method !== "GET" && opts?.body != null) {
         const encoded = JSON.stringify(opts.body) as string | undefined;
         if (encoded === undefined) {
           throw new TypeError("request body is not JSON-encodable");

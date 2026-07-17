@@ -30,6 +30,37 @@ describe("requestRaw — happy paths", () => {
     expect(init.body).toBeUndefined();
   });
 
+  it("PUT sends rawBody as-is with the caller's Content-Type (no JSON encoding)", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify({ status: "saved" }), { status: 200 }));
+    const fx = createFetch({ fetchFn });
+    const yaml = "providers:\n  opensubtitles:\n    enabled: true\n";
+    const r = await fx.requestRaw("PUT", "/config", {
+      rawBody: yaml,
+      headers: { "Content-Type": "text/yaml" },
+    });
+    expect(r).toEqual({ ok: true, status: 200, data: { status: "saved" } });
+    const [, init] = callArgs(fetchFn);
+    expect(init.body).toBe(yaml); // NOT JSON.stringify(yaml)
+    expect((init.headers as Headers).get("content-type")).toBe("text/yaml");
+  });
+
+  it("rejects body + rawBody together as a client-side invalid request", async () => {
+    const fetchFn = stubFetch(new Response(null, { status: 200 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("POST", "/x", { body: { a: 1 }, rawBody: "raw" });
+    expect(r).toMatchObject({ ok: false, status: 0, code: "invalid" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("ignores rawBody on GET (same contract as body)", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x", { rawBody: "ignored" });
+    expect(r).toMatchObject({ ok: true, status: 200 });
+    const [, init] = callArgs(fetchFn);
+    expect(init.body).toBeUndefined();
+  });
+
   it("POST encodes the JSON body and sets Content-Type", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ id: 7 }), { status: 201 }));
     const fx = createFetch({ fetchFn });
