@@ -10,28 +10,28 @@ from reading the source. For org-wide defaults not repeated here, see the
 The library is a handful of small, single-purpose modules under `src/`, each
 paired with a colocated `*.test.ts`:
 
-- `types.ts` — pure types, no imports, no runtime: `HttpMethod`, `Decoder`,
+- `types.ts`: pure types, no imports, no runtime: `HttpMethod`, `Decoder`,
   `FetchConfig`, `ApiOk` / `ApiErr` / `ApiResult`, `RequestOptions`. Any module
   may depend on it.
-- `timeout.ts` — `withTimeout` (composes a caller signal with
+- `timeout.ts`: `withTimeout` (composes a caller signal with
   `AbortSignal.timeout` via `AbortSignal.any`) and the `API_TIMEOUT_MS`
-  default. The toolkit's single timeout-composition implementation;
+  default. The single timeout-composition implementation;
   `@cplieger/actions` imports it from here.
-- `request.ts` — the core. `makeRequestRaw(cfg)` builds a config-bound
+- `request.ts`: the core. `makeRequestRaw(cfg)` builds a config-bound
   `requestRaw` (builds the request, runs the fetch, resolves to an `ApiResult`)
   over an immutable `FetchConfig`; `makeRequest` wraps it into the
   null-collapsing `request`. These are config-parametrized factories, assembled
   per instance in `instance.ts`.
-- `verbs.ts` — `makeVerbs(request, requestRaw)` builds the 12 thin per-verb
+- `verbs.ts`: `makeVerbs(request, requestRaw)` builds the 12 thin per-verb
   helpers (`apiGet`, `apiGetRaw`, `apiGetTyped`, …) bound to a request pair.
-- `instance.ts` — the single assembly site. `createFetch(config?)`
+- `instance.ts`: the single assembly site. `createFetch(config?)`
   shallow-copies and freezes the config, then composes `makeRequestRaw` /
   `makeRequest` / `makeVerbs` into a `FetchInstance` (its own `requestRaw` /
   `request` / 12 verbs). Instances are the only configuration surface: two
   instances share nothing, there is no module-global default, and a changed
   backend produces a new instance.
 
-The public API is whatever `src/index.ts` re-exports — that file is the
+The public API is whatever `src/index.ts` re-exports; that file is the
 contract. Update it deliberately, and keep the README `## API` section in sync.
 
 ### Invariants (protect these)
@@ -58,7 +58,7 @@ contract. Update it deliberately, and keep the README `## API` section in sync.
   `baseUrl` unset, `path` is passed to `fetch()` verbatim. See the README path
   contract note.
 - **Zero runtime dependencies.** `package.json` `dependencies` is empty and
-  stays empty — everything is built on the platform `fetch` / `Headers` /
+  stays empty: everything is built on the platform `fetch` / `Headers` /
   `AbortSignal`. Decoder combinators and a retry/interceptor layer are
   [out of scope](README.md#unsupported-by-design); do not add them here.
 - **Config is immutable and instance-scoped.** `createFetch` shallow-copies and
@@ -69,7 +69,7 @@ contract. Update it deliberately, and keep the README `## API` section in sync.
   belongs inside the `prepareHeaders` hook, which runs on every call.
 - **Neutralize, not reject.** The path contract defuses navigation syntax and
   still sends the request; a pre-network `code: "invalid"` rejection was
-  evaluated and declined (see the README design note). Do not re-propose it
+  evaluated and declined. Do not re-propose it
   without a real cross-origin consumer.
 
 ## Public API surface
@@ -94,10 +94,10 @@ npx prettier --check .    # formatting (printWidth 100)
 
 The `typecheck` scripts run `tsc`, the TypeScript 7 native compiler. It comes
 from the `@typescript/native` devDependency (an npm alias for `typescript@7`),
-which `npm install` places at `node_modules/.bin/tsc` — no separate install
+which `npm install` places at `node_modules/.bin/tsc`; no separate install
 step. (The `typescript` devDependency is aliased to `@typescript/typescript6`,
 the TS 6.x API `typescript-eslint` needs; its bin is `tsc6`, so it never shadows
-the native `tsc`.) There is no build step — the package ships TypeScript source
+the native `tsc`.) There is no build step: the package ships TypeScript source
 directly (both npm and JSR reference `src/**/*.ts`), so consumers compile it
 through their own bundler.
 
@@ -109,7 +109,7 @@ through their own bundler.
   setup; matching the existing style is mandatory or the resolution breaks.
 - **Strict compiler.** `tsconfig.json` enables `exactOptionalPropertyTypes`,
   `noUncheckedIndexedAccess`, `noPropertyAccessFromIndexSignature`,
-  `noImplicitOverride`, and friends — which is why `ApiErr` is built by
+  `noImplicitOverride`, and friends, which is why `ApiErr` is built by
   conditionally assigning `code` / `requestId` rather than passing `undefined`.
 - **Strict typed ESLint.** `eslint.config.mjs` runs the `strictTypeChecked` and
   `stylisticTypeChecked` presets: no `any` (prefer `unknown`), inline `import
@@ -118,7 +118,7 @@ type`, `eqeqeq`, `curly`, `prefer-const`. Prefix deliberately unused names
 - **Tests are colocated** as `src/**/*.test.ts` (the only pattern vitest
   includes), with the property suite in `src/*.property.test.ts` via
   `fast-check`. Build a fresh `createFetch({ fetchFn })` instance per test with
-  a stubbed `fetchFn` rather than hitting the network — instances share
+  a stubbed `fetchFn` rather than hitting the network: instances share
   nothing, so there is no global state to reset between tests.
 - **DOM tests** run under `happy-dom` (via the `// @vitest-environment
 happy-dom` pragma), so `Response` / `Headers` / `AbortSignal` are available in
@@ -147,5 +147,5 @@ bumps use `chore(devdeps)` and are intentionally skipped.
 By participating you agree to the
 [Code of Conduct](https://github.com/cplieger/.github/blob/main/CODE_OF_CONDUCT.md).
 Report vulnerabilities through the
-[security policy](https://github.com/cplieger/.github/blob/main/SECURITY.md) —
+[security policy](https://github.com/cplieger/.github/blob/main/SECURITY.md),
 never in a public issue.
