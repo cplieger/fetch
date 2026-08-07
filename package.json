@@ -43,6 +43,23 @@
     "type": "git",
     "url": "git+https://github.com/cplieger/fetch.git"
   },
+  "homepage": "https://github.com/cplieger/fetch",
+  "bugs": {
+    "url": "https://github.com/cplieger/fetch/issues"
+  },
+  "author": "cplieger <917744+cplieger@users.noreply.github.com>",
+  "keywords": [
+    "fetch",
+    "http-client",
+    "api-client",
+    "json",
+    "result",
+    "error-handling",
+    "abortsignal",
+    "timeout",
+    "zero-dependency",
+    "typescript"
+  ],
   "files": [
     "src/",
     "!src/**/*.test.ts",
