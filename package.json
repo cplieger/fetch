@@ -34,7 +34,7 @@
     }
   },
   "description": "Small, zero-dependency universal fetch wrapper for TypeScript with typed result envelopes",
-  "license": "GPL-3.0-or-later",
+  "license": "Apache-2.0",
   "types": "./src/index.ts",
   "publishConfig": {
     "access": "public"
