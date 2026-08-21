@@ -139,6 +139,31 @@ describe("baseUrl + path joining (property)", () => {
     }
   });
 
+  it("neutralizes a lone '.' segment, not just '..'", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    const fx = createFetch({
+      baseUrl: `${ORIGIN}/v1`,
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    await fx.requestRaw("GET", "/./config");
+    const url = fetchFn.mock.calls[0]![0] as string;
+    // Double-encoded, so URL normalization cannot pop it: the caller's literal
+    // "." segment reaches the server as path data instead of vanishing.
+    expect(new URL(url).pathname).toBe("/v1/%252E/config");
+  });
+
+  it("splits at the first marker when the path carries both a query and a fragment", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    const fx = createFetch({
+      baseUrl: `${ORIGIN}/v1`,
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    await fx.requestRaw("GET", "/search?next=/../home#frag");
+    // Splitting at the "#" instead would drag the query into the path part and
+    // dot-neutralize the caller's `next=/../home` value.
+    expect(fetchFn.mock.calls[0]![0]).toBe(`${ORIGIN}/v1/search?next=/../home#frag`);
+  });
+
   it("keeps any generated dot-segment / backslash path inside the base path (generator)", async () => {
     const BASE = `${ORIGIN}/v1`;
     const dangerToken = fc.constantFrom(
