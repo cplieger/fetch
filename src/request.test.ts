@@ -61,6 +61,15 @@ describe("requestRaw — happy paths", () => {
     expect(init.body).toBeUndefined();
   });
 
+  it("ignores body on GET (same contract as rawBody)", async () => {
+    const fetchFn = stubFetch(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
+    const fx = createFetch({ fetchFn });
+    await fx.requestRaw("GET", "/x", { body: { a: 1 } });
+    const [, init] = callArgs(fetchFn);
+    expect(init.body).toBeUndefined();
+    expect((init.headers as Headers).get("content-type")).toBeNull();
+  });
+
   it("POST encodes the JSON body and sets Content-Type", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ id: 7 }), { status: 201 }));
     const fx = createFetch({ fetchFn });
@@ -117,6 +126,20 @@ describe("requestRaw — empty bodies", () => {
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw("GET", "/empty");
     expect(r).toEqual({ ok: true, status: 200, data: undefined });
+  });
+
+  it("short-circuits a 204 without reading the body", async () => {
+    // A custom fetchFn is caller code, so a 204 that still offers a readable
+    // body can reach the core; the 204-is-empty rule is this library's to
+    // enforce. Reading it would surface `{ a: 1 }` as data.
+    const fetchFn = (async () => ({
+      ok: true,
+      status: 204,
+      text: async () => JSON.stringify({ a: 1 }),
+    })) as unknown as typeof fetch;
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("DELETE", "/items/1");
+    expect(r).toEqual({ ok: true, status: 204, data: undefined });
   });
 });
 
@@ -336,6 +359,28 @@ describe("requestRaw — ignoreBody", () => {
     expect(decoder).not.toHaveBeenCalled();
   });
 
+  it("releases the unread response body stream", async () => {
+    const chunks = [new TextEncoder().encode("payload nobody reads")];
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const chunk = chunks.shift();
+        if (chunk === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+    const res = new Response(body, { status: 200 });
+    const stream = res.body;
+    const fx = createFetch({ fetchFn: stubFetch(res) });
+    await fx.requestRaw("DELETE", "/x", { ignoreBody: true });
+    // The skipped body was cancelled, so the connection is released rather
+    // than held open by an unread stream: nothing is left to read.
+    const read = await stream!.getReader().read();
+    expect(read.done).toBe(true);
+  });
+
   it("still parses the error envelope on a non-2xx response", async () => {
     const fetchFn = stubFetch(
       new Response(JSON.stringify({ error: "nope", code: "denied" }), { status: 403 }),
@@ -458,6 +503,17 @@ describe("requestRaw — thrown fetch errors", () => {
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw("GET", "/x");
     expect(r).toEqual({ ok: false, status: 0, code: "timeout", error: "aborted" });
+  });
+
+  it("classifies a non-abort DOMException as 'network', not 'timeout'", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValue(
+        new DOMException("blocked by policy", "NotAllowedError"),
+      ) as unknown as typeof fetch;
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toEqual({ ok: false, status: 0, code: "network", error: "blocked by policy" });
   });
 
   it("classifies a failure as 'cancelled' when the caller signal is aborted", async () => {
@@ -608,6 +664,42 @@ describe("requestRaw — maxResponseBytes", () => {
       code: "network",
       error: "response exceeds 3 bytes",
     });
+  });
+
+  it("rejects a declared content-length over the cap before reading the body", async () => {
+    // The body itself is 3 bytes: only the declared length can trigger this,
+    // which is the point of the up-front check — an untrusted upstream must not
+    // be able to make the client buffer first and measure afterwards.
+    const fetchFn = stubFetch(
+      new Response("[1]", { status: 200, headers: { "content-length": "1000" } }),
+    );
+    const fx = createFetch({ fetchFn, maxResponseBytes: 100 });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toEqual({
+      ok: false,
+      status: 0,
+      code: "network",
+      error: "response exceeds 100 bytes",
+    });
+  });
+
+  it("reassembles a multi-chunk streamed body in order", async () => {
+    const encoder = new TextEncoder();
+    const chunks = [encoder.encode('{"a":'), encoder.encode('"bc"}')];
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const chunk = chunks.shift();
+        if (chunk === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+    const fetchFn = stubFetch(new Response(body, { status: 200 }));
+    const fx = createFetch({ fetchFn, maxResponseBytes: 100 });
+    const r = await fx.requestRaw<{ a: string }>("GET", "/x");
+    expect(r).toEqual({ ok: true, status: 200, data: { a: "bc" } });
   });
 
   it("rejects a streaming 2xx response as soon as it crosses the cap", async () => {
