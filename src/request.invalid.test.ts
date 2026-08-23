@@ -1,12 +1,10 @@
-// @vitest-environment node
-//
-// Client-side "invalid" classification. These run under the *node*
-// environment rather than happy-dom: they rely on the platform's strict
-// validation of header names, timeout ranges, and JSON encoding to make the
-// build phase throw. happy-dom's Headers / AbortSignal stubs are lenient and
-// would let an invalid request build; Node's undici Headers and
-// AbortSignal.timeout match real browser/runtime behaviour, so requestRaw sees
-// the throw and classifies it as "invalid" (never "network").
+// Client-side "invalid" classification. These tests depend on the platform
+// validating strictly: a bad header name, an out-of-range timeout, or a body
+// JSON cannot encode has to throw during the build phase so requestRaw
+// classifies the failure as "invalid" and never reaches the network (which
+// would classify it "network" instead). Chromium's Headers and
+// AbortSignal.timeout enforce exactly that, so the suite runs in the same
+// browser as the rest of the package with no environment opt-out.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createFetch } from "./instance.js";
 

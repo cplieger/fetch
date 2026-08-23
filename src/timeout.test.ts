@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
 import { API_TIMEOUT_MS, withTimeout } from "./timeout.js";
 

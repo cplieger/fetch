@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createFetch } from "./instance.js";
 import type { Decoder } from "./types.js";
