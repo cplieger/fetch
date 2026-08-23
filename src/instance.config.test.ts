@@ -202,3 +202,63 @@ describe("createFetch — baseUrl origin protection", () => {
     expect(urlOf(fetchFn)).toBe("https://api.example.com/v1//evil.com/x");
   });
 });
+
+describe("createFetch — maxResponseBytes validation", () => {
+  // A 50 KB body, the size the mutation pass measured riding back intact under
+  // a NaN cap: every `> NaN` comparison is false, so both the declared-length
+  // and the streamed path in readBounded read without a bound.
+  const FIFTY_KB = "x".repeat(50_000);
+  const bigBody = JSON.stringify({ s: FIFTY_KB });
+
+  it("refuses a NaN cap at construction instead of silently disabling the cap", () => {
+    expect(() => createFetch({ maxResponseBytes: Number.NaN })).toThrow(TypeError);
+    expect(() => createFetch({ maxResponseBytes: Number.NaN })).toThrow(/maxResponseBytes/);
+  });
+
+  it("refuses the unset-env-var shape, Number(process.env.MAX_BYTES) === NaN", () => {
+    const fromEnv = Number(process.env["FETCH_MAX_BYTES_NOT_SET"]);
+    expect(Number.isNaN(fromEnv)).toBe(true);
+    expect(() => createFetch({ maxResponseBytes: fromEnv })).toThrow(TypeError);
+  });
+
+  it("never gets as far as a request under a NaN cap, so no body is buffered", () => {
+    const fetchFn = stubFetch(new Response(bigBody, { status: 200 }));
+    expect(() => createFetch({ fetchFn, maxResponseBytes: Number.NaN })).toThrow(TypeError);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("keeps Infinity meaning unlimited: a 50 KB body is buffered in full", async () => {
+    const fetchFn = stubFetch(
+      new Response(bigBody, {
+        status: 200,
+        headers: { "content-length": String(bigBody.length) },
+      }),
+    );
+    const fx = createFetch({ fetchFn, maxResponseBytes: Number.POSITIVE_INFINITY });
+    const r = await fx.requestRaw<{ s: string }>("GET", "/x");
+    expect(r).toEqual({ ok: true, status: 200, data: { s: FIFTY_KB } });
+  });
+
+  it("still rejects that same 50 KB body under a finite cap", async () => {
+    const fetchFn = stubFetch(
+      new Response(bigBody, {
+        status: 200,
+        headers: { "content-length": String(bigBody.length) },
+      }),
+    );
+    const fx = createFetch({ fetchFn, maxResponseBytes: 10 });
+    const r = await fx.requestRaw("GET", "/x");
+    expect(r).toEqual({
+      ok: false,
+      status: 0,
+      code: "network",
+      error: "response exceeds 10 bytes",
+    });
+  });
+
+  it("accepts an unset cap and a finite positive cap unchanged", () => {
+    expect(() => createFetch()).not.toThrow();
+    expect(() => createFetch({})).not.toThrow();
+    expect(() => createFetch({ maxResponseBytes: 1024 })).not.toThrow();
+  });
+});

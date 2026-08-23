@@ -43,9 +43,11 @@ export interface FetchConfig {
    *  the hook rather than reconfiguring the instance. */
   prepareHeaders?: (headers: Headers) => Headers | undefined | Promise<Headers | undefined>;
   /** Optional cap on the response body size in bytes. Unset means unlimited
-   *  (the current behavior). When set, a larger body is rejected instead of
-   *  buffered; a defense-in-depth guard for the SSR/Node path against a
-   *  hostile upstream. */
+   *  (the current behavior), as does `Infinity`. When set, a larger body is
+   *  rejected instead of buffered; a defense-in-depth guard for the SSR/Node
+   *  path against a hostile upstream. `NaN` is rejected by {@link createFetch}
+   *  with a `TypeError` — nothing is `> NaN`, so it would read unbounded while
+   *  looking like a configured cap. */
   maxResponseBytes?: number;
 }
 

@@ -131,7 +131,7 @@ const [a, b] = await Promise.all([tenantA.apiGet<User>("/me"), tenantB.apiGet<Us
 - `FetchConfig`: the configuration shape.
 - `FetchInstance`: the instance shape.
 
-> `maxResponseBytes` is an opt-in cap on the response body size (unset = unlimited, the default). When set, a response whose `content-length` exceeds it, or whose streamed body grows past it, is rejected rather than buffered: a defense-in-depth guard against a hostile upstream (e.g. the SSR / Node path). An over-cap 2xx body surfaces as `code: "network"` (status 0); an over-cap error body falls back to the `HTTP <status>` message.
+> `maxResponseBytes` is an opt-in cap on the response body size (unset = unlimited, the default; `Infinity` means the same). When set, a response whose `content-length` exceeds it, or whose streamed body grows past it, is rejected rather than buffered: a defense-in-depth guard against a hostile upstream (e.g. the SSR / Node path). An over-cap 2xx body surfaces as `code: "network"` (status 0); an over-cap error body falls back to the `HTTP <status>` message. A cap of `NaN` — what `Number(process.env.MAX_BYTES)` yields when the variable is unset — is refused by `createFetch` with a `TypeError`, because nothing compares `>` against it and the read would be unbounded while looking capped.
 
 ### Request core (per instance)
 

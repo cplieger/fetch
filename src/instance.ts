@@ -29,6 +29,13 @@ export interface FetchInstance extends FetchVerbs {
  * token set after boot) reads it from inside `prepareHeaders`, which runs per
  * request.
  *
+ * Throws a `TypeError` on a `maxResponseBytes` of `NaN`: nothing is ever
+ * `> NaN`, so such a cap would read unbounded while the caller believes a cap
+ * is set (the shape `Number(process.env.MAX_BYTES)` produces when the variable
+ * is unset). This is the one knob whose purpose is bounding a hostile upstream,
+ * so it fails loudly here — once, at construction — rather than per request.
+ * `Infinity` is accepted and means unlimited, as does leaving it unset.
+ *
  * @example
  * ```ts
  * export const api = createFetch({ baseUrl: "https://api.example.com/v1", credentials: "include" });
@@ -36,6 +43,13 @@ export interface FetchInstance extends FetchVerbs {
  * ```
  */
 export function createFetch(config: FetchConfig = {}): FetchInstance {
+  // An unset cap needs no arm of its own: Number.isNaN does not coerce, so
+  // undefined is not NaN.
+  if (Number.isNaN(config.maxResponseBytes)) {
+    throw new TypeError(
+      "createFetch: maxResponseBytes must be a byte count (or Infinity for no cap), not NaN",
+    );
+  }
   const cfg: FetchConfig = Object.freeze({ ...config });
   const requestRaw = makeRequestRaw(cfg);
   const request = makeRequest(requestRaw);
