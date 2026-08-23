@@ -120,9 +120,12 @@ type`, `eqeqeq`, `curly`, `prefer-const`. Prefix deliberately unused names
   `fast-check`. Build a fresh `createFetch({ fetchFn })` instance per test with
   a stubbed `fetchFn` rather than hitting the network: instances share
   nothing, so there is no global state to reset between tests.
-- **DOM tests** run under `happy-dom` (via the `// @vitest-environment
-happy-dom` pragma), so `Response` / `Headers` / `AbortSignal` are available in
-  tests without a browser.
+- **Tests run in a real browser.** Vitest Browser Mode drives headless
+  Chromium (`vitest.config.ts`), so `Response` / `Headers` / `URL` /
+  `AbortSignal` are the platform's own implementations rather than an
+  emulator's. There is no `environment` setting and no per-file environment
+  pragma. First run locally needs the browser once:
+  `npx --no-install playwright install chromium`.
 - **Don't edit `.github/workflows/*`.** `ci.yaml` and `release.yaml` are synced
   from `cplieger/ci` and marked DO NOT EDIT; behavior changes belong upstream.
 

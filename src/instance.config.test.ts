@@ -1,5 +1,3 @@
-// @vitest-environment happy-dom
-//
 // Config behavior of createFetch instances: baseUrl joining, the
 // prepareHeaders hook, credentials, per-request headers, and the
 // origin-override protection. (Formerly config.test.ts, when configuration
@@ -215,8 +213,17 @@ describe("createFetch — maxResponseBytes validation", () => {
     expect(() => createFetch({ maxResponseBytes: Number.NaN })).toThrow(/maxResponseBytes/);
   });
 
-  it("refuses the unset-env-var shape, Number(process.env.MAX_BYTES) === NaN", () => {
-    const fromEnv = Number(process.env["FETCH_MAX_BYTES_NOT_SET"]);
+  it("refuses the unset-env-var shape, Number(undefined) === NaN", () => {
+    // The subject is the VALUE an unset env var produces, not the reader: a
+    // build step that forwards `Number(env.MAX_BYTES)` hands `NaN` to the
+    // constructor whenever the variable is missing. The env is modelled as the
+    // string map it is rather than read off `process`, which the browser this
+    // suite runs in does not define; the value reaching createFetch is
+    // identical, and it must still arrive via an absent-key read rather than a
+    // `Number.NaN` literal, which is what separates this case from the one
+    // above.
+    const env: Record<string, string | undefined> = {};
+    const fromEnv = Number(env["FETCH_MAX_BYTES_NOT_SET"]);
     expect(Number.isNaN(fromEnv)).toBe(true);
     expect(() => createFetch({ maxResponseBytes: fromEnv })).toThrow(TypeError);
   });
