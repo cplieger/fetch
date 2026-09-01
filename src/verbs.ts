@@ -1,10 +1,3 @@
-// Thin per-verb helpers over a request core. The plain helpers null-collapse
-// (return T | null); the *Raw helpers surface the full ApiResult envelope; the
-// *Typed helpers thread a decoder for runtime validation. makeVerbs binds a
-// (request, requestRaw) pair — the module-global default or a per-instance pair
-// from createFetch (both assembled in instance.ts).
-// ---------------------------------------------------------------------------
-
 import type { ApiResult, Decoder, RequestFn, RequestOptions, RequestRawFn } from "./types.js";
 
 /** The bundle of 12 verb helpers a fetch instance exposes. */
@@ -90,5 +83,3 @@ export function makeVerbs(request: RequestFn, requestRaw: RequestRawFn): FetchVe
     },
   };
 }
-
-// The verb bindings are assembled per instance in instance.ts (createFetch).

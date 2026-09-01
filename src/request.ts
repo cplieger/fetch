@@ -1,11 +1,3 @@
-// The non-throwing core. requestRaw builds the request, performs the fetch via
-// the instance's config, and ALWAYS resolves to an ApiResult<T> — every
-// failure mode (invalid, network, timeout, cancellation, non-2xx, decode) is
-// returned, never thrown. request() is the thin null-collapsing wrapper over
-// it. makeRequestRaw/makeRequest are the config-parametrized factories, bound
-// to an immutable per-instance config in instance.ts.
-// ---------------------------------------------------------------------------
-
 import type { FetchConfig } from "./types.js";
 import { API_TIMEOUT_MS, withTimeout } from "./timeout.js";
 import type {
@@ -36,10 +28,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-/** Build an ApiErr, omitting optional fields when absent (exactOptionalPropertyTypes).
- *  `headers` is passed only where a real HTTP response exists (non-2xx or a
- *  2xx decode failure), per the ApiErr.headers contract. `body` is passed only
- *  where that response carried parseable JSON, per the ApiErr.body contract. */
+/** Build an ApiErr, omitting optional fields when absent
+ *  (exactOptionalPropertyTypes). `headers`/`body` are passed only where a real
+ *  HTTP response exists, per the ApiErr contract. */
 function makeErr(
   status: number,
   error: string,
@@ -86,22 +77,17 @@ function statusOf(res: Response): number {
  * Neutralize a relative path's parser-significant navigation syntax before it
  * is concatenated onto a base URL, so a crafted path cannot escape the base
  * path prefix via URL normalization. A leading slash is ensured, backslashes
- * (special-scheme URL parsing treats `\` as `/`) are percent-encoded, the
- * ASCII TAB / LF / CR the WHATWG URL parser strips outright (else two dots
- * astride a stripped char could fuse into a live `..` after the guard) are
- * percent-encoded (`%09` / `%0A` / `%0D`) in the path part only, and any
- * dot-segment — `.` / `..` and the percent-encoded equivalents (`%2e`,
- * `%2e%2e`, `.%2e`, …) the WHATWG URL parser would otherwise pop — is
- * double-encoded so it survives normalization as opaque path data. The dots
- * become `%252E`, not `%2E`, on purpose: `%2E`/`%2e` is still recognized as a
- * dot octet and would be popped.
+ * are percent-encoded, ASCII TAB / LF / CR (which the WHATWG URL parser strips
+ * before a stripped char could fuse two dots into a live `..`) are
+ * percent-encoded in the path part only, and any dot-segment — `.` / `..` and
+ * percent-encoded equivalents — is double-encoded so it survives
+ * normalization as opaque path data. The dots become `%252E`, not `%2E`: the
+ * latter is still recognized as a dot octet and would be popped.
  */
 function safeSuffix(path: string): string {
-  // Isolate the query (`?`) / fragment (`#`) before segment processing: the
+  // Query (`?`) / fragment (`#`) are isolated before segment processing: the
   // URL parser does not path-normalize them and they must reach the server
-  // verbatim. Folding them into the path both missed a `..`/`.` adjacent to
-  // `?`/`#` (a live navigation operator that escaped the base path prefix) and
-  // double-encoded dot-segments inside query values, corrupting them.
+  // verbatim.
   const marks = [path.indexOf("?"), path.indexOf("#")].filter((i) => i !== -1);
   const sep = marks.length > 0 ? Math.min(...marks) : -1;
   const pathPart = sep === -1 ? path : path.slice(0, sep);
@@ -125,11 +111,9 @@ function safeSuffix(path: string): string {
 }
 
 /**
- * Join a base URL with a relative path per the relative-path contract:
- * strip a trailing slash from the base, then append the path via
- * {@link safeSuffix}, which ensures a single leading slash and preserves the
- * base path prefix against dot-segment / backslash navigation. With no base,
- * the path is returned verbatim.
+ * Join a base URL with a relative path: strip a trailing slash from the base,
+ * then append the path via {@link safeSuffix}. With no base, the path is
+ * returned verbatim.
  */
 function joinUrl(baseUrl: string | undefined, path: string): string {
   if (baseUrl === undefined) {
@@ -155,18 +139,16 @@ function mergeHeaders(target: Headers, source: Record<string, string> | Headers 
   }
 }
 
-/** The caller-aborted-wins envelope shared by both classifiers, so the
- *  cancelled status/message/code stay defined in exactly one place. */
+/** The caller-aborted-wins envelope shared by both classifiers. */
 function cancelledErr(): ApiErr {
   return makeErr(0, "request cancelled", "cancelled");
 }
 
 /**
  * Classify a throw from the BUILD phase (header construction, JSON body
- * encoding, the `prepareHeaders` hook, timeout composition, url join) into an
- * ApiErr. A caller that already aborted ⇒ "cancelled"; every other build
- * failure is a client-side "invalid" request — it never reached the network,
- * so classifying it as "network" would be a misdiagnosis.
+ * encoding, `prepareHeaders`, timeout composition, url join). A caller that
+ * already aborted classifies as "cancelled"; every other build failure is a
+ * client-side "invalid" request — it never reached the network.
  */
 function classifyBuildError(e: unknown, callerSignal: AbortSignal | undefined): ApiErr {
   if (callerSignal?.aborted === true) {
@@ -176,12 +158,9 @@ function classifyBuildError(e: unknown, callerSignal: AbortSignal | undefined): 
 }
 
 /**
- * Classify a thrown error from the FETCH / response-read phase into an ApiErr.
- * Priority:
- *  1. caller signal already aborted → "cancelled" (status 0)
- *  2. DOMException TimeoutError / AbortError → "timeout" (status 0)
- *  3. everything else (TypeError, a malformed result from a custom fetchFn, a
- *     mid-body read failure) → "network" (status 0)
+ * Classify a thrown error from the FETCH / response-read phase. Priority:
+ * caller signal already aborted → "cancelled"; DOMException TimeoutError /
+ * AbortError → "timeout"; everything else → "network".
  */
 function classifyThrown(e: unknown, callerSignal: AbortSignal | undefined): ApiErr {
   if (callerSignal?.aborted === true) {
@@ -193,11 +172,10 @@ function classifyThrown(e: unknown, callerSignal: AbortSignal | undefined): ApiE
   return makeErr(0, errMsg(e), "network");
 }
 
-/** Read a response body as text, optionally bounded to `max` bytes. When `max`
- *  is undefined the read is unbounded (byte-identical to `res.text()`, the
- *  default). When set, a `content-length` over the cap is rejected up front and
- *  the streamed body is aborted the moment it exceeds the cap, so an untrusted
- *  upstream (the documented SSR/Node path) cannot force unbounded buffering. */
+/** Read a response body as text, optionally bounded to `max` bytes. When set,
+ *  a `content-length` over the cap is rejected up front and the streamed body
+ *  is aborted the moment it exceeds the cap, so an untrusted upstream cannot
+ *  force unbounded buffering. */
 async function readBounded(res: Response, max: number | undefined): Promise<string> {
   if (max === undefined) {
     return res.text();
@@ -234,10 +212,7 @@ async function readBounded(res: Response, max: number | undefined): Promise<stri
   return new TextDecoder().decode(combined);
 }
 
-/** Parse a non-2xx response body, lifting error / code / request_id fields.
- *  `res.status` is coerced to a number: a custom `fetchFn` may return a truthy
- *  non-Response whose `status` is undefined, and `ApiErr.status` is `number`.
- *  `max` bounds the body read (see {@link readBounded}); undefined = unbounded. */
+/** Parse a non-2xx response body, lifting error / code / request_id fields. */
 async function parseErrorResponse(res: Response, max: number | undefined): Promise<ApiErr> {
   const status = statusOf(res);
   let error = `HTTP ${status}`;
@@ -261,16 +236,14 @@ async function parseErrorResponse(res: Response, max: number | undefined): Promi
       }
     }
   } catch {
-    // Non-JSON / empty error body — keep the `HTTP <status>` fallback (and
-    // leave `parsed` undefined so no body field rides the envelope).
+    // Non-JSON / empty error body: keep the `HTTP <status>` fallback.
   }
   return makeErr(status, error, code, requestId, res.headers, parsed);
 }
 
 /**
- * Build the non-throwing request core bound to an immutable config. The config
- * is captured once at instance construction ({@link createFetch}); a changed
- * backend produces a new instance.
+ * Build the non-throwing request core bound to an immutable config, captured
+ * once at instance construction ({@link createFetch}).
  */
 export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
   return async function requestRaw<T>(
@@ -281,10 +254,8 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
     let callerSignal: AbortSignal | undefined;
 
     // --- Build phase ------------------------------------------------------
-    // Header construction, JSON body encoding, the prepareHeaders hook, timeout
-    // composition, and url join. A throw here is a client-side "invalid"
-    // request (or "cancelled" if the caller already aborted) — never hit the
-    // network.
+    // A throw here is a client-side "invalid" request (or "cancelled" if the
+    // caller already aborted) — never hit the network.
     const init: RequestInit = { method };
     let url: string;
     try {
@@ -293,11 +264,7 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
       if (opts?.rawBody !== undefined && opts.body != null) {
         throw new TypeError("body and rawBody are mutually exclusive");
       }
-      // A null / undefined body means "no body": send neither payload nor a
-      // Content-Type (POSTing a literal JSON `null` is a non-need).
       if (method !== "GET" && opts?.rawBody !== undefined) {
-        // Pre-encoded body: sent as-is, no JSON encoding, no automatic
-        // Content-Type — the caller owns the type via headers.
         init.body = opts.rawBody;
       } else if (method !== "GET" && opts?.body != null) {
         const encoded = JSON.stringify(opts.body) as string | undefined;
@@ -328,7 +295,7 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
       return classifyBuildError(e, callerSignal);
     }
 
-    // --- Fetch phase ------------------------------------------------------
+    // --- Fetch phase --------------------------------------------------------
     // A throw here is a genuine network / timeout / cancellation failure.
     let res: Response;
     try {
@@ -338,12 +305,11 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
       return classifyThrown(e, callerSignal);
     }
 
-    // --- Response phase ---------------------------------------------------
-    // Interpret the result. The outer try preserves the never-throw guarantee
-    // for a malformed result from a custom fetchFn (e.g. null) and for a
-    // mid-body read failure — both are network-class. A JSON.parse / decoder
-    // throw is a "decode" error, handled by its own inner try before it can
-    // reach here.
+    // --- Response phase -----------------------------------------------------
+    // The outer try preserves the never-throw guarantee for a malformed
+    // result from a custom fetchFn and for a mid-body read failure. A
+    // JSON.parse / decoder throw is a "decode" error, handled by its own
+    // inner try before it can reach here.
     try {
       if (!res.ok) {
         return await parseErrorResponse(res, cfg.maxResponseBytes);
@@ -354,9 +320,6 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
       }
 
       if (opts?.ignoreBody === true) {
-        // Caller declared the success body irrelevant: skip the read and the
-        // decoder entirely. Cancel the unread stream so the connection is
-        // released (best-effort; a null body or a locked stream is fine).
         try {
           await res.body?.cancel();
         } catch {
@@ -401,8 +364,7 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
 
 /**
  * Build a null-collapsing `request` over a `requestRaw`: the decoded data on a
- * successful result, or `null` on any error. Prefer the raw form when you need
- * the status code or error details.
+ * successful result, or `null` on any error.
  */
 export function makeRequest(raw: RequestRawFn): RequestFn {
   return async function request<T>(
@@ -411,8 +373,6 @@ export function makeRequest(raw: RequestRawFn): RequestFn {
     opts?: RequestOptions<T>,
   ): Promise<T | null> {
     const result = await raw<T>(method, path, opts);
-    // Collapse a truly-empty body (204 / empty ⇒ data === undefined) to null. A
-    // JSON `null` / `0` / `false` / `""` body is real data and passes through.
     return result.ok && result.data !== undefined ? result.data : null;
   };
 }
