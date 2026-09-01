@@ -128,9 +128,8 @@ describe("requestRaw — empty bodies", () => {
   });
 
   it("short-circuits a 204 without reading the body", async () => {
-    // A custom fetchFn is caller code, so a 204 that still offers a readable
-    // body can reach the core; the 204-is-empty rule is this library's to
-    // enforce. Reading it would surface `{ a: 1 }` as data.
+    // A custom fetchFn could return a readable body on a 204; reading it
+    // would surface `{ a: 1 }` as data instead of the empty-204 contract.
     const fetchFn = (async () => ({
       ok: true,
       status: 204,

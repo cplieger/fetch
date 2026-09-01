@@ -1,7 +1,5 @@
-// Config behavior of createFetch instances: baseUrl joining, the
-// prepareHeaders hook, credentials, per-request headers, and the
-// origin-override protection. (Formerly config.test.ts, when configuration
-// had its own module; v2 folded config capture into createFetch.)
+// Config behavior of createFetch instances: baseUrl joining, prepareHeaders,
+// credentials, per-request headers, and origin-override protection.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createFetch } from "./instance.js";
 
@@ -202,9 +200,8 @@ describe("createFetch — baseUrl origin protection", () => {
 });
 
 describe("createFetch — maxResponseBytes validation", () => {
-  // A 50 KB body, the size the mutation pass measured riding back intact under
-  // a NaN cap: every `> NaN` comparison is false, so both the declared-length
-  // and the streamed path in readBounded read without a bound.
+  // A 50 KB body: every `> NaN` comparison is false, so a NaN cap reads
+  // unbounded on both the declared-length and streamed paths in readBounded.
   const FIFTY_KB = "x".repeat(50_000);
   const bigBody = JSON.stringify({ s: FIFTY_KB });
 
@@ -214,14 +211,9 @@ describe("createFetch — maxResponseBytes validation", () => {
   });
 
   it("refuses the unset-env-var shape, Number(undefined) === NaN", () => {
-    // The subject is the VALUE an unset env var produces, not the reader: a
-    // build step that forwards `Number(env.MAX_BYTES)` hands `NaN` to the
-    // constructor whenever the variable is missing. The env is modelled as the
-    // string map it is rather than read off `process`, which the browser this
-    // suite runs in does not define; the value reaching createFetch is
-    // identical, and it must still arrive via an absent-key read rather than a
-    // `Number.NaN` literal, which is what separates this case from the one
-    // above.
+    // Models an unset env var as the string map it is (rather than reading
+    // `process`, absent in the browser this suite runs in) so the value
+    // reaching createFetch is an absent-key read, not a NaN literal.
     const env: Record<string, string | undefined> = {};
     const fromEnv = Number(env["FETCH_MAX_BYTES_NOT_SET"]);
     expect(Number.isNaN(fromEnv)).toBe(true);

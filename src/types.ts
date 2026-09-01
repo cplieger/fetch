@@ -1,25 +1,18 @@
-// Public types for @cplieger/fetch. Pure types — no imports, no runtime
-// behavior — so any module in the library can depend on this without pulling
-// in config / request / verbs.
-// ---------------------------------------------------------------------------
+/** Public types for @cplieger/fetch. No imports, no runtime behavior. */
 
 /** HTTP verbs the wrapper speaks. */
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /**
- * A runtime validator for a 2xx response body. Returns the typed value on a
- * valid shape, or THROWS on a mismatch. `@cplieger/fetch` ships only this type
- * plus the optional invocation seam — decoder combinators are deliberately out
- * of scope, so each consumer supplies its own validators (hand-written, zod,
- * valibot, …).
+ * A runtime validator for a 2xx response body: returns the typed value or
+ * THROWS on a mismatch. Ships no combinators — each consumer supplies its own
+ * validators (hand-written, zod, valibot, …).
  */
 export type Decoder<T> = (value: unknown) => T;
 
 /** Configuration for a fetch instance. Captured immutably by
  *  {@link createFetch} (shallow-copied and frozen at construction); a changed
- *  backend produces a new instance. An injection seam modelled on RTK's
- *  fetchBaseQuery: baseUrl, credentials, a header-preparation hook, and a
- *  custom fetch implementation for tests / SSR. */
+ *  backend produces a new instance. */
 export interface FetchConfig {
   /** Prepended to relative paths. The trailing `/` is stripped and a leading
    *  `/` is ensured on the path before joining.
@@ -37,17 +30,15 @@ export interface FetchConfig {
   /** Custom fetch implementation. Useful for SSR (isomorphic fetch) or tests. */
   fetchFn?: typeof fetch;
   /** Inject headers on every request. Mutate the provided instance and/or
-   *  return a replacement (RTK convention: a returned `Headers` wins wholesale,
-   *  otherwise the mutated instance is used). May be async (e.g. to read a
-   *  token store) — read late-bound state (a token set after boot) from inside
-   *  the hook rather than reconfiguring the instance. */
+   *  return a replacement (a returned `Headers` wins wholesale, otherwise the
+   *  mutated instance is used). May be async — read late-bound state (a token
+   *  set after boot) from inside the hook rather than reconfiguring the
+   *  instance. */
   prepareHeaders?: (headers: Headers) => Headers | undefined | Promise<Headers | undefined>;
-  /** Optional cap on the response body size in bytes. Unset means unlimited
-   *  (the current behavior), as does `Infinity`. When set, a larger body is
-   *  rejected instead of buffered; a defense-in-depth guard for the SSR/Node
-   *  path against a hostile upstream. `NaN` is rejected by {@link createFetch}
-   *  with a `TypeError` — nothing is `> NaN`, so it would read unbounded while
-   *  looking like a configured cap. */
+  /** Optional cap on the response body size in bytes. Unset or `Infinity`
+   *  means unlimited. When set, a larger body is rejected instead of buffered.
+   *  `NaN` is rejected by {@link createFetch} with a `TypeError`: nothing is
+   *  `> NaN`, so it would read unbounded while looking like a configured cap. */
   maxResponseBytes?: number;
 }
 
@@ -55,11 +46,8 @@ export interface FetchConfig {
 export interface ApiOk<T> {
   readonly ok: true;
   readonly status: number;
-  /** The decoded / parsed response body. It is `undefined` for a 204 or any
-   *  empty-body response, so a caller using the `*Raw` helpers on a
-   *  204-capable endpoint should type `T` to include `undefined` (or branch on
-   *  `status`). The null-collapsing helpers (`request` / `apiGet` / …) turn
-   *  that `undefined` into `null`. */
+  /** The decoded / parsed response body. `undefined` for a 204 or any
+   *  empty-body response; the null-collapsing helpers turn that into `null`. */
   readonly data: T;
 }
 
@@ -72,40 +60,28 @@ export interface ApiErr {
   readonly error: string;
   /** Machine code: `"network"` | `"timeout"` | `"cancelled"` | `"decode"` |
    *  `"invalid"`, or a server-supplied code lifted from the error body.
-   *  `"invalid"` marks a client-side build failure (an un-encodable body, a bad
-   *  header name/value, a bad `timeoutMs`, or a throwing `prepareHeaders`) that
-   *  never reached the network.
    *
-   *  This field is dual-purpose: a server-controlled body value shares the
-   *  namespace with the library's own control codes, so a compromised or
+   *  SECURITY: this field is dual-purpose — a server-controlled body value
+   *  shares the namespace with the library's own control codes, so a
    *  malicious upstream can spoof a reserved value. Disambiguate by `status`,
-   *  never by `code` alone: the reserved library codes carry `status === 0`
-   *  (except `"decode"`, which carries the real 2xx status), whereas a lifted
-   *  server-supplied code always carries the real non-2xx HTTP status. A
-   *  consumer branching on a reserved code (e.g. `r.code === "cancelled"`) MUST
-   *  also check `status` to avoid misclassifying a server error. */
+   *  never by `code` alone: the reserved codes carry `status === 0` (except
+   *  `"decode"`, which carries the real 2xx status); a lifted server code
+   *  always carries the real non-2xx status. */
   readonly code?: string;
   /** Lifted from the error body's `request_id` / `requestId`, when present. */
   readonly requestId?: string;
   /** The parsed JSON body of the failed response, present when a real HTTP
-   *  response carried parseable JSON: a non-2xx (whatever its shape, including
-   *  a bare primitive or `null`), or a 2xx whose `decoder` rejected. Absent on
-   *  network / timeout / cancelled / invalid failures (no response) and on
-   *  non-JSON / empty bodies. Lets a caller consume a meaningful error
-   *  envelope (e.g. a 409 whose body carries conflict details) without
-   *  leaving the result union.
+   *  response carried parseable JSON (any shape). Absent on network / timeout
+   *  / cancelled / invalid failures and on non-JSON / empty bodies.
    *
    *  SECURITY: server-controlled content, same trust level as `error` —
    *  validate the shape before reading fields, and render any text from it
    *  via textContent, never innerHTML. */
   readonly body?: unknown;
   /** Response headers, present only when an HTTP response was actually
-   *  received: a non-2xx error, or a 2xx whose body failed decoding (both
-   *  carry a real `status > 0`). Absent on network / timeout / cancelled /
-   *  invalid failures, which have no response. Lets a caller read
-   *  error-response diagnostics (e.g. `Retry-After` on a 429) without leaving
-   *  the envelope. Success responses deliberately do not carry headers —
-   *  drop to raw `fetch` for full response-metadata access. */
+   *  received (a non-2xx error, or a 2xx whose body failed decoding). Absent
+   *  on network / timeout / cancelled / invalid failures. Success responses
+   *  deliberately do not carry headers — drop to raw `fetch` for that. */
   readonly headers?: Headers;
 }
 
@@ -118,10 +94,8 @@ export interface RequestOptions<T = unknown> {
   body?: unknown;
   /** Pre-encoded request body for non-GET requests, sent as-is with NO JSON
    *  encoding and NO automatic Content-Type — the caller owns the type via
-   *  `headers` (e.g. a YAML config document with `Content-Type: text/yaml`).
-   *  Mutually exclusive with `body` (both set is a client-side `"invalid"`
-   *  failure). The response side is unchanged: replies still decode through
-   *  the JSON envelope. */
+   *  `headers`. Mutually exclusive with `body` (both set is a client-side
+   *  `"invalid"` failure). */
   rawBody?: BodyInit;
   /** Caller cancellation signal, composed with the request timeout. */
   signal?: AbortSignal;
@@ -131,17 +105,15 @@ export interface RequestOptions<T = unknown> {
   decoder?: Decoder<T>;
   /** Overrides the default request timeout (`API_TIMEOUT_MS`) for this request. */
   timeoutMs?: number;
-  /** Skip reading a 2xx response body entirely: the request resolves ok with
-   *  `data: undefined` (`null` after null-collapsing) and any `decoder` is not
-   *  invoked. Non-2xx error bodies are still parsed for the error envelope.
-   *  For endpoints whose success body is irrelevant or non-JSON (e.g. a
-   *  DELETE answering plain text). */
+  /** Skip reading a 2xx response body entirely: resolves ok with
+   *  `data: undefined` and any `decoder` is not invoked. Non-2xx error bodies
+   *  are still parsed. For endpoints whose success body is irrelevant or
+   *  non-JSON. */
   ignoreBody?: boolean;
 }
 
 /** The non-throwing request core signature: always resolves to an
- *  {@link ApiResult}, never throws. Shared by the default instance and every
- *  {@link createFetch} instance. */
+ *  {@link ApiResult}, never throws. */
 export type RequestRawFn = <T>(
   method: HttpMethod,
   path: string,

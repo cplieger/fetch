@@ -1,10 +1,7 @@
-// Client-side "invalid" classification. These tests depend on the platform
-// validating strictly: a bad header name, an out-of-range timeout, or a body
-// JSON cannot encode has to throw during the build phase so requestRaw
-// classifies the failure as "invalid" and never reaches the network (which
-// would classify it "network" instead). Chromium's Headers and
-// AbortSignal.timeout enforce exactly that, so the suite runs in the same
-// browser as the rest of the package with no environment opt-out.
+// Client-side "invalid" classification: a bad header, an out-of-range
+// timeout, or unencodable body JSON throws during the build phase, before the
+// network is touched, so requestRaw classifies it "invalid" rather than
+// "network".
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createFetch } from "./instance.js";
 

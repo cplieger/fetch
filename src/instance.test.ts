@@ -51,8 +51,8 @@ describe("createFetch — instance isolation", () => {
   });
 
   it("instance requestRaw returns the full envelope; verbs null-collapse", async () => {
-    // A fresh Response per call — a Response body is single-read, so a shared
-    // instance would be consumed by the first call and read empty by the second.
+    // A Response body is single-read; a shared instance would be consumed by
+    // the first call and read empty by the second.
     const f = vi.fn(() =>
       Promise.resolve(new Response(JSON.stringify({ a: 1 }), { status: 200 })),
     ) as unknown as typeof fetch;
