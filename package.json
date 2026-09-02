@@ -31,9 +31,7 @@
     "vitest": "4.1.11"
   },
   "overrides": {
-    "typed-rest-client": {
-      "qs": "6.15.3"
-    }
+    "qs": "^6.15.2"
   },
   "description": "Small, zero-dependency universal fetch wrapper for TypeScript with typed result envelopes",
   "license": "Apache-2.0",
