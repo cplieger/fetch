@@ -111,7 +111,12 @@ describe("envelope (*Raw) verb helpers", () => {
   it("apiGetRaw returns an ok envelope", async () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ a: 1 }), { status: 200 }));
     const fx = createFetch({ fetchFn });
-    expect(await fx.apiGetRaw("/x")).toEqual({ ok: true, status: 200, data: { a: 1 } });
+    expect(await fx.apiGetRaw("/x")).toEqual({
+      ok: true,
+      status: 200,
+      data: { a: 1 },
+      headers: expect.any(Headers),
+    });
   });
 
   it("apiGetRaw returns an err envelope with lifted fields", async () => {
@@ -136,7 +141,7 @@ describe("envelope (*Raw) verb helpers", () => {
       const fetchFn = stubFetch(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
       const fx = createFetch({ fetchFn });
       const r = await fx[name]("/x", { v: 1 });
-      expect(r).toEqual({ ok: true, status: 200, data: { ok: 1 } });
+      expect(r).toEqual({ ok: true, status: 200, data: { ok: 1 }, headers: expect.any(Headers) });
       expect(call(fetchFn)[1].method).toBe(method);
       expect(call(fetchFn)[1].body).toBe(JSON.stringify({ v: 1 }));
     }
@@ -145,7 +150,12 @@ describe("envelope (*Raw) verb helpers", () => {
   it("apiDeleteRaw returns an envelope", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
     const fx = createFetch({ fetchFn });
-    expect(await fx.apiDeleteRaw("/x")).toEqual({ ok: true, status: 204, data: undefined });
+    expect(await fx.apiDeleteRaw("/x")).toEqual({
+      ok: true,
+      status: 204,
+      data: undefined,
+      headers: expect.any(Headers),
+    });
   });
 });
 
@@ -162,6 +172,11 @@ describe("null body + empty body helpers", () => {
   it("apiGetRaw surfaces an empty body as ok with undefined data", async () => {
     const fetchFn = stubFetch(new Response("", { status: 200 }));
     const fx = createFetch({ fetchFn });
-    expect(await fx.apiGetRaw("/x")).toEqual({ ok: true, status: 200, data: undefined });
+    expect(await fx.apiGetRaw("/x")).toEqual({
+      ok: true,
+      status: 200,
+      data: undefined,
+      headers: expect.any(Headers),
+    });
   });
 });

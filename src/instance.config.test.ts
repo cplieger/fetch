@@ -235,7 +235,12 @@ describe("createFetch — maxResponseBytes validation", () => {
     );
     const fx = createFetch({ fetchFn, maxResponseBytes: Number.POSITIVE_INFINITY });
     const r = await fx.requestRaw<{ s: string }>("GET", "/x");
-    expect(r).toEqual({ ok: true, status: 200, data: { s: FIFTY_KB } });
+    expect(r).toEqual({
+      ok: true,
+      status: 200,
+      data: { s: FIFTY_KB },
+      headers: expect.any(Headers),
+    });
   });
 
   it("still rejects that same 50 KB body under a finite cap", async () => {

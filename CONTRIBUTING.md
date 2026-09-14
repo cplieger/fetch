@@ -49,10 +49,10 @@ contract. Update it deliberately, and keep the README `## API` section in sync.
 - **Status `0` means a pre-response failure.** `network`, `timeout`,
   `cancelled`, and the build-phase `invalid` errors all carry `status: 0`; a
   lifted server error carries the real HTTP status, and a `decode` error carries
-  the real 2xx status. `ApiErr.headers` follows the same line: present exactly
-  when a real HTTP response was received (any non-2xx, or a 2xx decode
-  failure), absent on every status-0 failure. Success envelopes never carry
-  headers.
+  the real 2xx status. Response headers follow the same line: present exactly
+  when a real HTTP response was received, so `ApiOk.headers` is always set and
+  `ApiErr.headers` is set on any non-2xx or 2xx decode failure and absent on
+  every status-0 failure.
 - **The relative-path contract.** With `baseUrl` set, the base scheme+host
   always precede `path` (one slash at the join, no origin override); with
   `baseUrl` unset, `path` is passed to `fetch()` verbatim. See the README path

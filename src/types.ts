@@ -49,6 +49,9 @@ export interface ApiOk<T> {
   /** The decoded / parsed response body. `undefined` for a 204 or any
    *  empty-body response; the null-collapsing helpers turn that into `null`. */
   readonly data: T;
+  /** Response headers. Always present: a success envelope exists only once a
+   *  real HTTP response was received. */
+  readonly headers: Headers;
 }
 
 /** Failure result envelope. Never thrown — always returned by `requestRaw`. */
@@ -80,8 +83,8 @@ export interface ApiErr {
   readonly body?: unknown;
   /** Response headers, present only when an HTTP response was actually
    *  received (a non-2xx error, or a 2xx whose body failed decoding). Absent
-   *  on network / timeout / cancelled / invalid failures. Success responses
-   *  deliberately do not carry headers — drop to raw `fetch` for that. */
+   *  on network / timeout / cancelled / invalid failures, the same rule that
+   *  makes {@link ApiOk.headers} always present. */
   readonly headers?: Headers;
 }
 
