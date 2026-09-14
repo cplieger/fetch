@@ -22,7 +22,12 @@ describe("requestRaw — happy paths", () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ name: "foo" }), { status: 200 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw<{ name: string }>("GET", "/items/1");
-    expect(r).toEqual({ ok: true, status: 200, data: { name: "foo" } });
+    expect(r).toEqual({
+      ok: true,
+      status: 200,
+      data: { name: "foo" },
+      headers: expect.any(Headers),
+    });
     const [url, init] = callArgs(fetchFn);
     expect(url).toBe("/items/1");
     expect(init.method).toBe("GET");
@@ -37,7 +42,12 @@ describe("requestRaw — happy paths", () => {
       rawBody: yaml,
       headers: { "Content-Type": "text/yaml" },
     });
-    expect(r).toEqual({ ok: true, status: 200, data: { status: "saved" } });
+    expect(r).toEqual({
+      ok: true,
+      status: 200,
+      data: { status: "saved" },
+      headers: expect.any(Headers),
+    });
     const [, init] = callArgs(fetchFn);
     expect(init.body).toBe(yaml); // NOT JSON.stringify(yaml)
     expect((init.headers as Headers).get("content-type")).toBe("text/yaml");
@@ -73,7 +83,7 @@ describe("requestRaw — happy paths", () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ id: 7 }), { status: 201 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw<{ id: number }>("POST", "/items", { body: { name: "bar" } });
-    expect(r).toEqual({ ok: true, status: 201, data: { id: 7 } });
+    expect(r).toEqual({ ok: true, status: 201, data: { id: 7 }, headers: expect.any(Headers) });
     const [, init] = callArgs(fetchFn);
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ name: "bar" }));
@@ -96,7 +106,12 @@ describe("requestRaw — happy paths", () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ deleted: true }), { status: 200 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw<{ deleted: boolean }>("DELETE", "/items/1");
-    expect(r).toEqual({ ok: true, status: 200, data: { deleted: true } });
+    expect(r).toEqual({
+      ok: true,
+      status: 200,
+      data: { deleted: true },
+      headers: expect.any(Headers),
+    });
     const [, init] = callArgs(fetchFn);
     expect(init.body).toBeUndefined();
     expect((init.headers as Headers).get("content-type")).toBeNull();
@@ -117,14 +132,14 @@ describe("requestRaw — empty bodies", () => {
     const fetchFn = stubFetch(new Response(null, { status: 204 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw("DELETE", "/items/1");
-    expect(r).toEqual({ ok: true, status: 204, data: undefined });
+    expect(r).toEqual({ ok: true, status: 204, data: undefined, headers: expect.any(Headers) });
   });
 
   it("empty 200 body resolves to ok with undefined data", async () => {
     const fetchFn = stubFetch(new Response("", { status: 200 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw("GET", "/empty");
-    expect(r).toEqual({ ok: true, status: 200, data: undefined });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined, headers: expect.any(Headers) });
   });
 
   it("short-circuits a 204 without reading the body", async () => {
@@ -252,6 +267,27 @@ describe("requestRaw — non-2xx responses", () => {
   });
 });
 
+describe("requestRaw — success-response headers", () => {
+  it("carries the response headers on a 2xx ok envelope", async () => {
+    const fetchFn = stubFetch(
+      new Response(JSON.stringify([1, 2]), {
+        status: 200,
+        headers: { "Subject-Stamp": '{"kind":"series","ref":"","version":"17","epoch":"a1"}' },
+      }),
+    );
+    const fx = createFetch({ fetchFn });
+    const r = await fx.requestRaw<number[]>("GET", "/coverage/series");
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      return;
+    }
+    expect(r.headers).toBeInstanceOf(Headers);
+    expect(r.headers.get("Subject-Stamp")).toBe(
+      '{"kind":"series","ref":"","version":"17","epoch":"a1"}',
+    );
+  });
+});
+
 describe("requestRaw — error-response headers", () => {
   it("carries the response headers on a non-2xx error envelope", async () => {
     const fetchFn = stubFetch(
@@ -343,7 +379,7 @@ describe("requestRaw — ignoreBody", () => {
     const fetchFn = stubFetch(new Response("plain text, not json", { status: 200 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw("DELETE", "/items/1", { ignoreBody: true });
-    expect(r).toEqual({ ok: true, status: 200, data: undefined });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined, headers: expect.any(Headers) });
   });
 
   it("does not invoke a supplied decoder", async () => {
@@ -353,7 +389,7 @@ describe("requestRaw — ignoreBody", () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ a: 1 }), { status: 200 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw("GET", "/x", { decoder, ignoreBody: true });
-    expect(r).toEqual({ ok: true, status: 200, data: undefined });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined, headers: expect.any(Headers) });
     expect(decoder).not.toHaveBeenCalled();
   });
 
@@ -401,7 +437,7 @@ describe("requestRaw — decoding", () => {
     const fetchFn = stubFetch(new Response(JSON.stringify([1, 2, 3]), { status: 200 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw<number[]>("GET", "/nums");
-    expect(r).toEqual({ ok: true, status: 200, data: [1, 2, 3] });
+    expect(r).toEqual({ ok: true, status: 200, data: [1, 2, 3], headers: expect.any(Headers) });
   });
 
   it("runs a supplied decoder on the 2xx body", async () => {
@@ -414,7 +450,7 @@ describe("requestRaw — decoding", () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ n: 5 }), { status: 200 }));
     const fx = createFetch({ fetchFn });
     const r = await fx.requestRaw("GET", "/n", { decoder });
-    expect(r).toEqual({ ok: true, status: 200, data: { n: 5 } });
+    expect(r).toEqual({ ok: true, status: 200, data: { n: 5 }, headers: expect.any(Headers) });
   });
 
   it("maps a decoder throw to code 'decode'", async () => {
@@ -570,7 +606,12 @@ describe("request — null collapsing", () => {
       const fetchFn = stubFetch(new Response(raw, { status: 200 }));
       const fx = createFetch({ fetchFn });
       const r = await fx.requestRaw("GET", "/x");
-      expect(r).toEqual({ ok: true, status: 200, data: JSON.parse(raw) as unknown });
+      expect(r).toEqual({
+        ok: true,
+        status: 200,
+        data: JSON.parse(raw) as unknown,
+        headers: expect.any(Headers),
+      });
     }
   });
 
@@ -639,7 +680,7 @@ describe("requestRaw — caller signal + timeout composition", () => {
     const fx = createFetch({ fetchFn });
     const ac = new AbortController();
     const r = await fx.requestRaw("GET", "/x", { signal: ac.signal });
-    expect(r).toEqual({ ok: true, status: 200, data: { v: 1 } });
+    expect(r).toEqual({ ok: true, status: 200, data: { v: 1 }, headers: expect.any(Headers) });
     const [, init] = callArgs(fetchFn);
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(init.signal).not.toBe(ac.signal);
@@ -697,7 +738,7 @@ describe("requestRaw — maxResponseBytes", () => {
     const fetchFn = stubFetch(new Response(body, { status: 200 }));
     const fx = createFetch({ fetchFn, maxResponseBytes: 100 });
     const r = await fx.requestRaw<{ a: string }>("GET", "/x");
-    expect(r).toEqual({ ok: true, status: 200, data: { a: "bc" } });
+    expect(r).toEqual({ ok: true, status: 200, data: { a: "bc" }, headers: expect.any(Headers) });
   });
 
   it("rejects a streaming 2xx response as soon as it crosses the cap", async () => {
@@ -728,7 +769,7 @@ describe("requestRaw — maxResponseBytes", () => {
     const fetchFn = stubFetch(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const fx = createFetch({ fetchFn, maxResponseBytes: 20 });
     const r = await fx.requestRaw<{ ok: boolean }>("GET", "/x");
-    expect(r).toEqual({ ok: true, status: 200, data: { ok: true } });
+    expect(r).toEqual({ ok: true, status: 200, data: { ok: true }, headers: expect.any(Headers) });
   });
 
   it("bounds non-2xx error bodies before lifting fields", async () => {
@@ -747,7 +788,7 @@ describe("requestRaw — maxResponseBytes", () => {
     const fetchFn = stubFetch(new Response(null, { status: 200 }));
     const fx = createFetch({ fetchFn, maxResponseBytes: 16 });
     const r = await fx.requestRaw("GET", "/x");
-    expect(r).toEqual({ ok: true, status: 200, data: undefined });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined, headers: expect.any(Headers) });
   });
 
   it("accepts a body whose content-length exactly equals the cap", async () => {
@@ -756,7 +797,7 @@ describe("requestRaw — maxResponseBytes", () => {
     );
     const fx = createFetch({ fetchFn, maxResponseBytes: 5 });
     const r = await fx.requestRaw<number[]>("GET", "/x");
-    expect(r).toEqual({ ok: true, status: 200, data: [1, 2] });
+    expect(r).toEqual({ ok: true, status: 200, data: [1, 2], headers: expect.any(Headers) });
   });
 
   it("accepts a streamed body whose total exactly equals the cap", async () => {
@@ -774,6 +815,6 @@ describe("requestRaw — maxResponseBytes", () => {
     const fetchFn = stubFetch(new Response(body, { status: 200 }));
     const fx = createFetch({ fetchFn, maxResponseBytes: 5 });
     const r = await fx.requestRaw<number[]>("GET", "/x");
-    expect(r).toEqual({ ok: true, status: 200, data: [1, 2] });
+    expect(r).toEqual({ ok: true, status: 200, data: [1, 2], headers: expect.any(Headers) });
   });
 });

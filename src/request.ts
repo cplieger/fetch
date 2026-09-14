@@ -316,7 +316,7 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
       }
       const status = statusOf(res);
       if (status === 204) {
-        return { ok: true, status, data: undefined as T };
+        return { ok: true, status, data: undefined as T, headers: res.headers };
       }
 
       if (opts?.ignoreBody === true) {
@@ -325,12 +325,12 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
         } catch {
           // Releasing the unread body is best-effort.
         }
-        return { ok: true, status, data: undefined as T };
+        return { ok: true, status, data: undefined as T, headers: res.headers };
       }
 
       const text = await readBounded(res, cfg.maxResponseBytes);
       if (text === "") {
-        return { ok: true, status, data: undefined as T };
+        return { ok: true, status, data: undefined as T, headers: res.headers };
       }
 
       let parsed: unknown;
@@ -342,7 +342,7 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
 
       if (opts?.decoder !== undefined) {
         try {
-          return { ok: true, status, data: opts.decoder(parsed) };
+          return { ok: true, status, data: opts.decoder(parsed), headers: res.headers };
         } catch (e) {
           return makeErr(
             status,
@@ -355,7 +355,7 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
         }
       }
 
-      return { ok: true, status, data: parsed as T };
+      return { ok: true, status, data: parsed as T, headers: res.headers };
     } catch (e) {
       return classifyThrown(e, callerSignal);
     }

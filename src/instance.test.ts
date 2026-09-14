@@ -58,7 +58,7 @@ describe("createFetch — instance isolation", () => {
     ) as unknown as typeof fetch;
     const inst = createFetch({ fetchFn: f });
     const raw = await inst.apiGetRaw<{ a: number }>("/x");
-    expect(raw).toEqual({ ok: true, status: 200, data: { a: 1 } });
+    expect(raw).toEqual({ ok: true, status: 200, data: { a: 1 }, headers: expect.any(Headers) });
     const data = await inst.apiGet<{ a: number }>("/x");
     expect(data).toEqual({ a: 1 });
   });
