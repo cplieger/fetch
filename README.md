@@ -153,6 +153,8 @@ const [a, b] = await Promise.all([tenantA.apiGet<User>("/me"), tenantB.apiGet<Us
 - `API_TIMEOUT_MS`: default request timeout (30 000 ms).
 
 > **Runtime baseline:** `AbortSignal.timeout` is required (Chrome 103 / Safari 16 / Firefox 100 / Node 18+). Composing a caller signal with the timeout additionally needs `AbortSignal.any` (Chrome 116 / Safari 17.4 / Firefox 124 / Node 20.3+); on a runtime without it, `withTimeout` degrades to timeout-only (the caller signal is dropped, the timeout still applies) rather than failing to build the request.
+>
+> **`credentials` is browser-only in effect:** the mode is copied onto the `RequestInit` only when the instance configures one, so an instance that leaves it unset behaves identically on every runtime. Where it is set, only a browser acts on it. Node's `fetch` accepts the field and ignores it, attaching no cookies and raising nothing, and a Workers runtime has no cookie store to draw on either, so a `credentials: "include"` instance is a browser instance whose cookie-backed auth stops working silently when the same code runs on an SSR or Workers path.
 
 ### Types
 
