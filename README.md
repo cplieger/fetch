@@ -1,8 +1,6 @@
 # fetch
 
-[![npm](https://img.shields.io/npm/v/@cplieger/fetch)](https://www.npmjs.com/package/@cplieger/fetch)
-[![JSR](https://jsr.io/badges/@cplieger/fetch)](https://jsr.io/@cplieger/fetch)
-[![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/fetch/badges/mutation-ts.json)](https://github.com/cplieger/fetch/issues?q=label%3Astryker-tracker)
+[![npm](https://img.shields.io/npm/v/@cplieger/fetch)](https://www.npmjs.com/package/@cplieger/fetch) [![JSR](https://jsr.io/badges/@cplieger/fetch)](https://jsr.io/@cplieger/fetch) [![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/fetch/badges/mutation-ts.json)](https://github.com/cplieger/fetch/issues?q=label%3Astryker-tracker)
 
 > Small, zero-dependency universal fetch wrapper with a typed, non-throwing result envelope.
 
