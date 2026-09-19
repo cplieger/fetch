@@ -67,6 +67,8 @@
   "files": [
     "src/",
     "jsr.json",
-    "!src/**/*.test.ts"
+    "!src/**/*.test.ts",
+    "LICENSE",
+    "NOTICE"
   ]
 }
