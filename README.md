@@ -2,11 +2,21 @@
 
 [![npm](https://img.shields.io/npm/v/@cplieger/fetch)](https://www.npmjs.com/package/@cplieger/fetch) [![JSR](https://jsr.io/badges/@cplieger/fetch)](https://jsr.io/@cplieger/fetch) [![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/fetch/badges/mutation-ts.json)](https://github.com/cplieger/fetch/issues?q=label%3Astryker-tracker)
 
-> Small, zero-dependency universal fetch wrapper with a typed, non-throwing result envelope.
+`@cplieger/fetch` wraps the platform `fetch` for TypeScript so JSON requests never throw. Each call returns a typed success or error value, or only the data or `null` when that is all you need.
 
-A standalone TypeScript wrapper around the platform `fetch`. The core never throws: every request resolves to an `ApiResult<T>`, a discriminated union of a success envelope (`{ ok: true, status, data, headers }`) and an error envelope (`{ ok: false, status, error, code?, requestId?, headers?, body? }`). Network failures, timeouts, cancellations, non-2xx responses, and decode errors are all values you branch on rather than exceptions you catch. On top of the core sit thin per-verb helpers: a null-collapsing form (`apiGet` → `data | null`), a full-envelope form (`apiGetRaw` → `ApiResult`), and a decoder-validated form (`apiGetTyped`). Configuration (base URL, credentials, a header-preparation hook, a custom fetch implementation) is captured immutably per instance by `createFetch`; there is no module-global state. Zero runtime dependencies, ESM-only, published as TypeScript source. Requires TypeScript ≥ 5.0 and an ESM bundler.
+It replaces the `try`/`catch`, the `response.ok` check and the `JSON.parse` you would otherwise write around each call. It has no runtime dependencies and ships as ESM-only TypeScript source, which your bundler compiles with your own code. It needs TypeScript 5.0 or later and runs on Node 18, Chrome 103, Safari 16 and Firefox 100 or later. It is licensed under Apache-2.0.
 
-`@cplieger/fetch` is the browser-side JSON-fetch counterpart to [`httpx`](https://github.com/cplieger/httpx) (the resilient _outbound_ HTTP library for Go), and it composes cleanly under [`@cplieger/actions`](https://github.com/cplieger/actions), which owns retry, dedupe, optimistic updates, and notification wiring. It deliberately owns only the request/response envelope; see [Unsupported by Design](#unsupported-by-design).
+## Why use it
+
+`@cplieger/fetch` is built for front-end and server-rendered code that calls a JSON API and wants to handle every failure in one `if`.
+
+- A network failure, a timeout, a cancelled request, a non-2xx response and a body that fails validation all come back as an error value with a `code`.
+- A failed response keeps its status, headers and parsed JSON body, so a 429's `Retry-After` is one property away.
+- Validation is a plain function, so a zod or valibot schema plugs in as `(v) => schema.parse(v)`.
+- With an absolute base URL, an absolute or protocol-relative path cannot reach another origin.
+- It is about 2 kB minified and gzipped, and its tests run against Chromium's own `fetch`, `Headers` and `AbortSignal`.
+
+Consider [ky](https://github.com/sindresorhus/ky) if you want retries, hooks and upload and download progress in one client. Consider [ofetch](https://github.com/unjs/ofetch) if you need binary or streamed responses and automatic retries on Node, browsers and workers.
 
 ## Install
 
@@ -18,177 +28,96 @@ npm i @cplieger/fetch
 
 ## Usage
 
-Create an instance once at boot (one line in a shared module), then call its verb helpers:
+Create one instance per backend, then branch on the result:
 
 ```typescript
 import { createFetch } from "@cplieger/fetch";
 
-export const api = createFetch({
-  baseUrl: "https://api.example.com/v1",
-  credentials: "include",
-  prepareHeaders: (headers) => {
-    // Runs per request; read late-bound state (a token set after boot) here.
-    headers.set("Authorization", `Bearer ${getToken()}`);
-  },
-});
+export const api = createFetch({ baseUrl: "https://api.example.com/v1" });
 
-// Null-collapsing: the decoded body on success, null on any error.
-const user = await api.apiGet<{ id: string; name: string }>("/users/me");
-if (user) {
-  console.log(user.name);
+const res = await api.apiGetRaw<{ id: string; name: string }>("/users/me");
+if (res.ok) {
+  console.log(res.data.name, res.headers.get("ETag"));
+} else {
+  // status is 0 when no response arrived; code says why.
+  console.error(res.status, res.code, res.error);
 }
+```
 
-// Create a resource with a JSON body.
+When you only need the data, the helpers without a suffix return it, or `null` on any error. `apiPost`, `apiPut` and `apiPatch` send their second argument as JSON with `Content-Type: application/json`:
+
+```typescript
+const user = await api.apiGet<{ id: string; name: string }>("/users/me"); // the user, or null
 const created = await api.apiPost<{ id: string }>("/items", { name: "widget" });
 ```
 
-### The result envelope
-
-When you need the status code or the error details, reach for the `*Raw` helpers (or `requestRaw` directly). They resolve to an `ApiResult<T>` and never throw:
+Validate a response body with any function that returns the typed value or throws. A throw becomes an error with `code: "decode"`:
 
 ```typescript
-const res = await api.apiGetRaw<{ id: string }>("/users/me");
-if (res.ok) {
-  // res.headers is the response's Headers, always present on a success.
-  console.log(res.status, res.data, res.headers.get("ETag"));
-} else {
-  // res.status is the HTTP status, or 0 for a network / timeout / cancelled /
-  // invalid failure.
-  // res.code is one of "network" | "timeout" | "cancelled" | "decode" |
-  // "invalid", or a server-supplied code lifted from the error body.
-  console.error(res.status, res.code, res.error, res.requestId);
-  // res.headers carries the response headers whenever a real HTTP response
-  // was received (any non-2xx, or a 2xx decode failure), e.g. Retry-After:
-  if (res.status === 429) {
-    console.warn("retry after", res.headers?.get("Retry-After"));
-  }
-}
+import { z } from "zod";
+
+const User = z.object({ id: z.string(), name: z.string() });
+const user = await api.apiGetTyped("/users/me", (v) => User.parse(v)); // typed, or null
 ```
 
-> On a 204 or empty-body 2xx response, a success envelope carries `data: undefined`. The null-collapsing helpers (`request` / `apiGet` / …) turn that into `null`; when you use the `*Raw` helpers on a 204-capable endpoint, type `T` to include `undefined` (or branch on `status`). A JSON `null` / `0` / `false` / `""` body is real data and passes through unchanged.
->
-> `code: "invalid"` marks a **client-side** build failure that never reached the network: an un-encodable body (circular / BigInt), a bad header name/value, a bad `timeoutMs`, or a throwing `prepareHeaders`. It is reported distinctly from `"network"`.
-
-### Runtime validation
-
-Pass a `Decoder<T>`, a function that returns the typed value or throws, to validate a 2xx body. A decoder throw becomes an `ApiErr` with `code: "decode"` (or `null` via the `*Typed` helpers):
-
-```typescript
-import { type Decoder } from "@cplieger/fetch";
-
-const decodeUser: Decoder<{ id: string }> = (v) => {
-  if (typeof v !== "object" || v === null || typeof (v as { id?: unknown }).id !== "string") {
-    throw new Error("expected { id: string }");
-  }
-  return v as { id: string };
-};
-
-const user = await api.apiGetTyped("/users/me", decodeUser); // { id: string } | null
-```
-
-### Per-request options
-
-Every helper accepts a trailing `RequestOptions`: a caller `AbortSignal`, per-request `headers`, a `decoder`, a `timeoutMs` override (default 30 000 ms), `ignoreBody`, and `rawBody`. `rawBody` is a pre-encoded `BodyInit` sent as-is: no JSON encoding, no automatic Content-Type (set the type via `headers`), mutually exclusive with `body`. The caller signal is composed with the request timeout, so whichever fires first aborts the request. The timeout covers the network round-trip only. The instance's `prepareHeaders` hook runs **before** the fetch and is **not** bounded by it, so a hook that may hang (an async token refresh) must self-bound.
+Every helper takes a last `options` argument for a cancel signal, a timeout, extra headers, a decoder, a pre-encoded body, or skipping the success body:
 
 ```typescript
 const controller = new AbortController();
-const res = await api.apiGetRaw("/slow", {
-  signal: controller.signal,
-  timeoutMs: 5_000,
-  headers: { "X-Request-Id": crypto.randomUUID() },
-});
-
-// ignoreBody: skip reading a 2xx success body entirely (data: undefined; a
-// supplied decoder is not invoked). Non-2xx error bodies are still parsed.
-// For endpoints whose success body is irrelevant or non-JSON.
+await api.apiGetRaw("/slow", { signal: controller.signal, timeoutMs: 5_000 });
 await api.apiDeleteRaw("/items/1", { ignoreBody: true });
 ```
 
-> **Path contract:** `path` is expected to be a **relative** path. With `baseUrl` set, the configured scheme+host always precede it, so an absolute (`https://…`) or protocol-relative (`//host`) path is neutralised (kept as a path segment) and cannot override the origin. A relative `path` also cannot escape the configured base path via `..` / dot-segment or backslash navigation: those are percent-encoded so the base path prefix always stands, while the query string and fragment are preserved verbatim. For this origin-override protection to hold, `baseUrl` must be an **absolute** URL (scheme + host); an empty or relative `baseUrl` does not neutralise a protocol-relative `path`. With `baseUrl` **unset**, `path` is passed to `fetch()` verbatim: the caller owns the full URL and must never pass untrusted input as the whole path.
-
-### Multiple backends
-
-Instances are cheap and fully isolated: one per origin / credential-set / tenant, or one per request for SSR. Two instances share nothing:
-
-```typescript
-import { createFetch } from "@cplieger/fetch";
-
-const tenantA = createFetch({ baseUrl: "https://a.example.com", credentials: "include" });
-const tenantB = createFetch({ baseUrl: "https://b.example.com" });
-
-const [a, b] = await Promise.all([tenantA.apiGet<User>("/me"), tenantB.apiGet<User>("/me")]);
-```
+Put query parameters in the path, such as `/items?page=2`. To add a header that changes after startup, such as a token, read it inside the instance's `prepareHeaders` hook, which runs on every request. The timeout starts after `prepareHeaders` returns, so a hook that can hang needs its own limit. [Requests, timeouts and runtimes](docs/requests.md) covers every setting and option.
 
 ## API
 
-### Instance factory
+- Instance: `createFetch(config?)` returns a `FetchInstance`. `FetchConfig` holds `baseUrl`, `credentials`, `prepareHeaders`, `fetchFn` and `maxResponseBytes`.
+- Requests on an instance: `requestRaw` and `request`, plus `apiGet`, `apiPost`, `apiPut`, `apiPatch` and `apiDelete` in a plain form that returns the data or `null` and a `*Raw` form that returns the full result. `apiGetTyped` and `apiPostTyped` also take a decoder.
+- Timeout: `withTimeout(signal, ms)` and `API_TIMEOUT_MS`, 30,000 ms.
+- Types: `ApiOk<T>`, `ApiErr`, `ApiResult<T>`, `Decoder<T>`, `HttpMethod`, `RequestOptions<T>`.
 
-- `createFetch(config?)`: build an isolated fetch instance. `config` (`baseUrl`, `credentials`, `prepareHeaders`, `fetchFn`, `maxResponseBytes`) is shallow-copied and frozen at construction. Returns a `FetchInstance` exposing `requestRaw`, `request`, and all twelve verb helpers.
-- `FetchConfig`: the configuration shape.
-- `FetchInstance`: the instance shape.
+The full reference is on [JSR](https://jsr.io/@cplieger/fetch/doc).
 
-> `maxResponseBytes` is an opt-in cap on the response body size (unset = unlimited, the default; `Infinity` means the same). When set, a response whose `content-length` exceeds it, or whose streamed body grows past it, is rejected rather than buffered: a defense-in-depth guard against a hostile upstream (e.g. the SSR / Node path). An over-cap 2xx body surfaces as `code: "network"` (status 0); an over-cap error body falls back to the `HTTP <status>` message. A cap of `NaN` — what `Number(process.env.MAX_BYTES)` yields when the variable is unset — is refused by `createFetch` with a `TypeError`, because nothing compares `>` against it and the read would be unbounded while looking capped.
+## Errors are values
 
-### Request core (per instance)
+`requestRaw` and every `*Raw` helper resolve to `ApiResult<T>` and never throw. A success is `{ ok: true, status, data, headers }`. An error is `{ ok: false, status, error, code?, requestId?, headers?, body? }`.
 
-- `requestRaw<T>(method, path, opts?)`: the non-throwing core; resolves to `ApiResult<T>`.
-- `request<T>(method, path, opts?)`: null-collapsing wrapper: `data` on success, `null` on any error.
+`status` is 0 when no response arrived. `code` is then `network`, `timeout`, `cancelled` or `invalid`, where `invalid` means the request could not be built and was never sent. A 2xx body that is not JSON or fails the decoder is `decode`, with the real status. A non-2xx response keeps its status and headers. When its body is JSON, `body` holds it, and its `error`, `code` and `request_id` fields fill the result's `error`, `code` and `requestId`.
 
-### Verb helpers (per instance)
+The server controls `code` and can send `timeout` or another library code. A library code comes with `status` 0, or the 2xx status for `decode`, and a server code always comes with its non-2xx status. Treat `body` as untrusted input.
 
-- `apiGet` / `apiPost` / `apiPut` / `apiPatch` / `apiDelete`: null-collapsing (`Promise<T | null>`).
-- `apiGetRaw` / `apiPostRaw` / `apiPutRaw` / `apiPatchRaw` / `apiDeleteRaw`: full envelope (`Promise<ApiResult<T>>`).
-- `apiGetTyped` / `apiPostTyped`: decoder-validated, null-collapsing.
+A 204 or an empty 2xx body gives `data: undefined`, which the plain helpers turn into `null`. A JSON `null`, `0`, `false` or `""` is real data.
 
-> Decoder validation on `apiPut` / `apiPatch` / `apiDelete` (and their `*Raw` forms) is available via the `decoder` option (e.g. `apiPut(path, body, { decoder })`) rather than dedicated `*Typed` helpers.
+[Results and errors](docs/results.md) has the full contract.
 
-### Timeout
+## Paths stay under your base URL
 
-- `withTimeout(signal, ms)`: compose an optional caller signal with a fresh timeout signal (via `AbortSignal.any` when available).
-- `API_TIMEOUT_MS`: default request timeout (30 000 ms).
+With an absolute `baseUrl`, every request goes to that scheme and host. A path such as `https://other.example` or `//host` becomes part of the path, so `https://api.example.com/v1` plus `https://other.example` requests `https://api.example.com/v1/https://other.example`. A `..`, a dot segment or a backslash cannot climb out of the base path, and the query string and fragment are sent as written.
 
-> **Runtime baseline:** `AbortSignal.timeout` is required (Chrome 103 / Safari 16 / Firefox 100 / Node 18+). Composing a caller signal with the timeout additionally needs `AbortSignal.any` (Chrome 116 / Safari 17.4 / Firefox 124 / Node 20.3+); on a runtime without it, `withTimeout` degrades to timeout-only (the caller signal is dropped, the timeout still applies) rather than failing to build the request.
->
-> **`credentials` is browser-only in effect:** the mode is copied onto the `RequestInit` only when the instance configures one, so an instance that leaves it unset behaves identically on every runtime. Where it is set, only a browser acts on it. Node's `fetch` accepts the field and ignores it, attaching no cookies and raising nothing, and a Workers runtime has no cookie store to draw on either, so a `credentials: "include"` instance is a browser instance whose cookie-backed auth stops working silently when the same code runs on an SSR or Workers path.
+The protection needs a `baseUrl` with a scheme and host. With an empty or relative `baseUrl`, a protocol-relative path can still reach another origin. With no `baseUrl`, the path goes to `fetch()` unchanged, so never pass untrusted input as the whole path.
 
-### Types
+[Base URLs and untrusted responses](docs/security.md) covers this and the response size cap.
 
-- `ApiOk<T>` / `ApiErr` / `ApiResult<T>`: the result envelope union. `ApiOk.headers` is the response's `Headers`, always present. `ApiErr.headers` carries the response headers whenever a real HTTP response was received (any non-2xx, or a 2xx decode failure); it is absent on network / timeout / cancelled / invalid failures. `ApiErr.body` carries the parsed JSON body of that response when one parsed (a 409 whose body is a meaningful conflict envelope, a decoder mismatch's raw value); absent on non-JSON / empty bodies and on the no-response failures. Treat it as server-controlled input: validate before reading fields, render text from it via `textContent`.
-- `Decoder<T>`: a runtime validator that returns the typed value or throws.
-- `HttpMethod`: `"GET" | "POST" | "PUT" | "PATCH" | "DELETE"`.
-- `RequestOptions<T>`: per-request `body`, `rawBody`, `signal`, `headers`, `decoder`, `timeoutMs`, `ignoreBody`.
+## Unsupported by design
 
-## Migrating from v1
+`@cplieger/fetch` has no retries or backoff, interceptor chains, response caching, decoder combinators, changeable or global settings, automatic idempotency-key or request-ID headers, or binary and streamed responses. [Unsupported by design](docs/non-goals.md) gives the reason for each and what to use instead.
 
-v2 removes the module-global config surface; instances are the only topology, and their config is immutable. Mechanical mapping:
+## Related projects
 
-| v1                                                | v2                                                                       |
-| ------------------------------------------------- | ------------------------------------------------------------------------ |
-| `configureFetch(cfg)` + top-level `apiGet` / …    | `export const api = createFetch(cfg)` + `api.apiGet` / …                 |
-| `instance.configure(cfg)` (shallow-merge)         | `createFetch({ ...oldCfg, ...cfg })`: a new instance (replace semantics) |
-| Late-bound token via a later `configure` call     | Read the token inside `prepareHeaders` (runs per request)                |
-| `resetFetchConfig()` / `getFetchConfig()` (tests) | Build a fresh instance per test; nothing global to reset                 |
+- [@cplieger/actions](https://github.com/cplieger/actions) builds on this library and adds retry with backoff, request dedupe, optimistic updates and notifications.
+- [httpx](https://github.com/cplieger/httpx) is the Go library for outbound HTTP calls, with retries and backoff built in.
 
-The envelope, verb helpers, path contract, timeout composition, and decoder seam are unchanged. New in v2: `ApiErr.headers` (error-response headers) and `RequestOptions.ignoreBody` (skip a 2xx body). New in v2.1: `ApiErr.body` (the parsed JSON body of a failed response) and `RequestOptions.rawBody` (pre-encoded request bodies). New in v2.2: `ApiOk.headers` (success-response headers).
+## Documentation
 
-## Unsupported by Design
-
-These features are intentionally out of scope. `@cplieger/fetch` is the request/response envelope, nothing more:
-
-| Feature                                    | Reason                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Retries / backoff                          | A dispatch-lifecycle concern. Compose with [`@cplieger/actions`](https://github.com/cplieger/actions) or a retry helper.                                                                                                                                                                                                                               |
-| Idempotency-key / `X-Request-ID` injection | The caller passes these per request via `opts.headers` (or the instance's `prepareHeaders` hook).                                                                                                                                                                                                                                                      |
-| Interceptor / middleware chains            | The single `prepareHeaders` seam plus `fetchFn` injection cover the real cases without a plugin pipeline.                                                                                                                                                                                                                                              |
-| Decoder combinators                        | Ships only the `Decoder<T>` type and the optional invocation seam. Each app keeps its own validators (hand-written, zod, valibot, …).                                                                                                                                                                                                                  |
-| Response caching / revalidation            | Out of paradigm: this is a fetch envelope, not a data cache.                                                                                                                                                                                                                                                                                           |
-| Mutable / module-global configuration      | Config is frozen at `createFetch`. A changed backend is a new instance; late-bound per-request state reads from inside `prepareHeaders`.                                                                                                                                                                                                               |
-| Non-JSON responses / raw `Response`        | The response side is JSON-envelope by design (request bodies may be pre-encoded via `rawBody`). Response headers ride `ApiOk.headers` / `ApiErr.headers` and a failed response's parsed JSON body rides `ApiErr.body`; for binary / streaming responses or the rest of the `Response` object (`statusText`, `url`, `redirected`), drop to raw `fetch`. |
+- [Results and errors](docs/results.md) lists every result field, error code and empty-body rule.
+- [Requests, timeouts and runtimes](docs/requests.md) covers instance settings, request options, timeouts and the runtime versions it needs.
+- [Base URLs and untrusted responses](docs/security.md) explains the path rules, the response size cap and how to read server-controlled fields.
+- [Unsupported by design](docs/non-goals.md) lists the features left out on purpose, with the reasons.
 
 ## Contributing
 
-Issues and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-conventions and how to run the checks locally.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions and how to run the checks locally.
 
 ## Disclaimer
 

@@ -37,7 +37,7 @@
   "overrides": {
     "qs": "^6.15.2"
   },
-  "description": "Small, zero-dependency universal fetch wrapper for TypeScript with typed result envelopes",
+  "description": "Handle TypeScript JSON requests without throws, as typed results or data-or-null values",
   "license": "Apache-2.0",
   "types": "./src/index.ts",
   "publishConfig": {
