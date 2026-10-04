@@ -97,7 +97,7 @@ With an absolute `baseUrl`, every request goes to that scheme and host. A path s
 
 The protection needs a `baseUrl` with a scheme and host. With an empty or relative `baseUrl`, a protocol-relative path can still reach another origin. With no `baseUrl`, the path goes to `fetch()` unchanged, so never pass untrusted input as the whole path.
 
-[Base URLs and untrusted responses](docs/security.md) covers this and the response size cap.
+[Base URLs and untrusted responses](docs/security-model.md) covers this and the response size cap.
 
 ## Unsupported by design
 
@@ -112,7 +112,7 @@ The protection needs a `baseUrl` with a scheme and host. With an empty or relati
 
 - [Results and errors](docs/results.md) lists every result field, error code and empty-body rule.
 - [Requests, timeouts and runtimes](docs/requests.md) covers instance settings, request options, timeouts and the runtime versions it needs.
-- [Base URLs and untrusted responses](docs/security.md) explains the path rules, the response size cap and how to read server-controlled fields.
+- [Base URLs and untrusted responses](docs/security-model.md) explains the path rules, the response size cap and how to read server-controlled fields.
 - [Unsupported by design](docs/non-goals.md) lists the features left out on purpose, with the reasons.
 
 ## Contributing
