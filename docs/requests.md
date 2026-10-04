@@ -6,12 +6,12 @@ This page covers how to set up an instance and shape each request, for a develop
 
 `createFetch(config?)` copies the settings and freezes them, so nothing changes them later. It returns a `FetchInstance` with `requestRaw`, `request` and the twelve verb helpers.
 
-| Key                | Default             | Description                                                                                                  |
-| ------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Key                | Default             | Description                                                                                                        |
+| ------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `baseUrl`          | _(unset)_           | Put before every path. Must be an absolute URL for the [path rules](security-model.md#paths-and-base-urls) to hold |
-| `credentials`      | _(unset)_           | The `RequestInit.credentials` mode for every request, such as `"include"` for cookies                        |
-| `prepareHeaders`   | _(unset)_           | A hook that sets headers on every request. See below                                                         |
-| `fetchFn`          | the global `fetch`  | Another `fetch` implementation, for server-side rendering or tests                                           |
+| `credentials`      | _(unset)_           | The `RequestInit.credentials` mode for every request, such as `"include"` for cookies                              |
+| `prepareHeaders`   | _(unset)_           | A hook that sets headers on every request. See below                                                               |
+| `fetchFn`          | the global `fetch`  | Another `fetch` implementation, for server-side rendering or tests                                                 |
 | `maxResponseBytes` | _(unset)_, no limit | A cap on the response body size. See [the size cap](security-model.md#response-size-cap)                           |
 
 ## One instance per backend
