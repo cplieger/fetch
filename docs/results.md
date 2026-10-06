@@ -6,28 +6,28 @@ This page lists what every request returns, for a developer writing the code tha
 
 `requestRaw` and the `*Raw` helpers resolve to `ApiResult<T>`, a union of `ApiOk<T>` and `ApiErr` that you narrow on `ok`. They never throw.
 
-| Field       | On       | Meaning                                                                                                            |
-| ----------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
-| `ok`        | both     | `true` on a 2xx response, unless its body is not JSON or fails the decoder. `false` otherwise                      |
-| `status`    | both     | The HTTP status, or 0 when no response arrived                                                                     |
-| `data`      | `ApiOk`  | The parsed or decoded body. `undefined` for a 204 or an empty body                                                 |
-| `headers`   | `ApiOk`  | The response `Headers`, always present                                                                             |
-| `error`     | `ApiErr` | A readable message                                                                                                 |
-| `code`      | `ApiErr` | One of the library codes below, or a code the server sent                                                          |
-| `requestId` | `ApiErr` | The `request_id` or `requestId` field of a JSON error body                                                         |
-| `headers`   | `ApiErr` | The response `Headers` whenever a response arrived. Absent when `status` is 0                                      |
-| `body`      | `ApiErr` | The parsed JSON body of a failed response, of any shape. Absent on a non-JSON or empty body and when `status` is 0 |
+| Field | On | Meaning |
+| --- | --- | --- |
+| `ok` | both | `true` on a 2xx response, unless its body is not JSON or fails the decoder. `false` otherwise |
+| `status` | both | The HTTP status, or 0 when no response arrived |
+| `data` | `ApiOk` | The parsed or decoded body. `undefined` for a 204 or an empty body |
+| `headers` | `ApiOk` | The response `Headers`, always present |
+| `error` | `ApiErr` | A readable message |
+| `code` | `ApiErr` | One of the library codes below, or a code the server sent |
+| `requestId` | `ApiErr` | The `request_id` or `requestId` field of a JSON error body |
+| `headers` | `ApiErr` | The response `Headers` whenever a response arrived. Absent when `status` is 0 |
+| `body` | `ApiErr` | The parsed JSON body of a failed response, of any shape. Absent on a non-JSON or empty body and when `status` is 0 |
 
 ## Error codes
 
-| `code`          | `status`                | When                                                                                                                            |
-| --------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `network`       | 0                       | `fetch` failed for a reason other than a timeout or your abort, or a 2xx body could not be read or went over `maxResponseBytes` |
-| `timeout`       | 0                       | The request timeout fired before the response finished                                                                          |
-| `cancelled`     | 0                       | Your `signal` was aborted, before or during the request                                                                         |
-| `invalid`       | 0                       | The request could not be built, so nothing was sent                                                                             |
-| `decode`        | the real 2xx status     | The body was not JSON, or the decoder threw                                                                                     |
-| any other value | the real non-2xx status | The server sent it in the error body                                                                                            |
+| `code` | `status` | When |
+| --- | --- | --- |
+| `network` | 0 | `fetch` failed for a reason other than a timeout or your abort, or a 2xx body could not be read or went over `maxResponseBytes` |
+| `timeout` | 0 | The request timeout fired before the response finished |
+| `cancelled` | 0 | Your `signal` was aborted, before or during the request |
+| `invalid` | 0 | The request could not be built, so nothing was sent |
+| `decode` | the real 2xx status | The body was not JSON, or the decoder threw |
+| any other value | the real non-2xx status | The server sent it in the error body |
 
 A request is `invalid` when the body cannot be JSON-encoded, such as a circular object, a `BigInt`, a function or a symbol. It is also `invalid` when `body` and `rawBody` are both set, when a header name or value is rejected, or when `prepareHeaders` throws. A `timeoutMs` below 0, above `Number.MAX_SAFE_INTEGER` or not finite, such as `NaN` or `Infinity`, is `invalid` too. If your signal was already aborted, a build failure is reported as `cancelled` instead.
 
@@ -54,11 +54,11 @@ A 204, or a 2xx with an empty body, gives `data: undefined`. With a `*Raw` helpe
 
 ## The three helper forms
 
-| Form  | Returns                                        | Helpers                                                                             |
-| ----- | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Plain | the data, or `null` on any error or empty body | `request`, `apiGet`, `apiPost`, `apiPut`, `apiPatch`, `apiDelete`                   |
-| Raw   | the full `ApiResult<T>`                        | `requestRaw`, `apiGetRaw`, `apiPostRaw`, `apiPutRaw`, `apiPatchRaw`, `apiDeleteRaw` |
-| Typed | the decoded data, or `null`                    | `apiGetTyped`, `apiPostTyped`                                                       |
+| Form | Returns | Helpers |
+| --- | --- | --- |
+| Plain | the data, or `null` on any error or empty body | `request`, `apiGet`, `apiPost`, `apiPut`, `apiPatch`, `apiDelete` |
+| Raw | the full `ApiResult<T>` | `requestRaw`, `apiGetRaw`, `apiPostRaw`, `apiPutRaw`, `apiPatchRaw`, `apiDeleteRaw` |
+| Typed | the decoded data, or `null` | `apiGetTyped`, `apiPostTyped` |
 
 `apiPut`, `apiPatch` and `apiDelete`, and their `*Raw` forms, validate through the `decoder` option instead, for example `api.apiPut(path, body, { decoder })`.
 
