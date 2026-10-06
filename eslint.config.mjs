@@ -1,4 +1,4 @@
-// Strict typed-linting config for @cplieger/actions.
+// Strict typed-linting config for @cplieger/fetch.
 //
 // The shared, org-synced ruleset lives in eslint.config.base.mjs (synced from
 // cplieger/ci). Do NOT edit the base here — the next sync would clobber it. This
@@ -6,7 +6,7 @@
 //   1. *.mjs handling — the base is vendored as a bare `eslint.config.base.mjs`
 //      (a `.mjs` that does not match the base's `*.config.mjs` glob), so the lint
 //      run must allow it under the default project and drop type-checked rules.
-//   2. A few extra test-file relaxations the actions suite relies on (void-typed
+//   2. A few extra test-file relaxations the fetch suite relies on (void-typed
 //      callbacks, empty stub fns, throw-literal characterization, single-line if,
 //      non-null-asserted optional chains) that the shared preset does not grant.
 
