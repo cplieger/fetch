@@ -6,13 +6,13 @@ This page covers how to set up an instance and shape each request, for a develop
 
 `createFetch(config?)` copies the settings and freezes them, so nothing changes them later. It returns a `FetchInstance` with `requestRaw`, `request` and the twelve verb helpers.
 
-| Key                | Default             | Description                                                                                                        |
-| ------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `baseUrl`          | _(unset)_           | Put before every path. Must be an absolute URL for the [path rules](security-model.md#paths-and-base-urls) to hold |
-| `credentials`      | _(unset)_           | The `RequestInit.credentials` mode for every request, such as `"include"` for cookies                              |
-| `prepareHeaders`   | _(unset)_           | A hook that sets headers on every request. See below                                                               |
-| `fetchFn`          | the global `fetch`  | Another `fetch` implementation, for server-side rendering or tests                                                 |
-| `maxResponseBytes` | _(unset)_, no limit | A cap on the response body size. See [the size cap](security-model.md#response-size-cap)                           |
+| Key | Default | Description |
+| --- | --- | --- |
+| `baseUrl` | _(unset)_ | Put before every path. Must be an absolute URL for the [path rules](security-model.md#paths-and-base-urls) to hold |
+| `credentials` | _(unset)_ | The `RequestInit.credentials` mode for every request, such as `"include"` for cookies |
+| `prepareHeaders` | _(unset)_ | A hook that sets headers on every request. See below |
+| `fetchFn` | the global `fetch` | Another `fetch` implementation, for server-side rendering or tests |
+| `maxResponseBytes` | _(unset)_, no limit | A cap on the response body size. See [the size cap](security-model.md#response-size-cap) |
 
 ## One instance per backend
 
@@ -39,15 +39,15 @@ The request timeout starts after the hook returns, so it does not bound the hook
 
 Every helper takes a last `RequestOptions` argument. The `apiPost`, `apiPut` and `apiPatch` helpers take the body as their second argument.
 
-| Option       | Description                                                                                                                                  |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `body`       | Sent as JSON with `Content-Type: application/json`, on any method except GET                                                                 |
-| `rawBody`    | A pre-encoded `BodyInit`, sent as it is on any method except GET, with no `Content-Type`. Set the type in `headers`. Not allowed with `body` |
-| `signal`     | Your `AbortSignal`, combined with the timeout                                                                                                |
-| `headers`    | A plain object or `Headers`, merged before `prepareHeaders`                                                                                  |
-| `decoder`    | Validates a 2xx body. See [Decoders](results.md#decoders)                                                                                    |
-| `timeoutMs`  | Overrides the 30,000 ms default for this request. Must be a finite number from 0 to `Number.MAX_SAFE_INTEGER`                                |
-| `ignoreBody` | Skips reading a 2xx body. `data` is `undefined` and the decoder is not called. Error bodies are still read                                   |
+| Option | Description |
+| --- | --- |
+| `body` | Sent as JSON with `Content-Type: application/json`, on any method except GET |
+| `rawBody` | A pre-encoded `BodyInit`, sent as it is on any method except GET, with no `Content-Type`. Set the type in `headers`. Not allowed with `body` |
+| `signal` | Your `AbortSignal`, combined with the timeout |
+| `headers` | A plain object or `Headers`, merged before `prepareHeaders` |
+| `decoder` | Validates a 2xx body. See [Decoders](results.md#decoders) |
+| `timeoutMs` | Overrides the 30,000 ms default for this request. Must be a finite number from 0 to `Number.MAX_SAFE_INTEGER` |
+| `ignoreBody` | Skips reading a 2xx body. `data` is `undefined` and the decoder is not called. Error bodies are still read |
 
 ```typescript
 const controller = new AbortController();
