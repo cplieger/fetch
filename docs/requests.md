@@ -13,6 +13,7 @@ This page covers how to set up an instance and shape each request, for a develop
 | `prepareHeaders` | _(unset)_ | A hook that sets headers on every request. See below |
 | `fetchFn` | the global `fetch` | Another `fetch` implementation, for server-side rendering or tests |
 | `maxResponseBytes` | _(unset)_, no limit | A cap on the response body size. See [the size cap](security-model.md#response-size-cap) |
+| `onError` | _(unset)_ | A hook that sees every failure. See [Observing failures](#observing-failures) |
 
 ## One instance per backend
 
@@ -35,9 +36,26 @@ To change a setting, create a new instance, for example `createFetch({ ...oldCon
 
 The request timeout starts after the hook returns, so it does not bound the hook. A hook that can hang, such as a token refresh over the network, needs its own time limit.
 
+## Observing failures
+
+`onError(err, req)` runs once for every failure the instance returns, from the plain, `*Raw` and typed helpers alike. `err` is the `ApiErr` the caller receives, with `code`, `requestId` and `body` already read from the response. `req` holds the request's `method` and its `path` as you passed it, before the `baseUrl` join. It never runs for a success.
+
+Use it for one policy across every call, such as a sign-in redirect on an expired session or failure logging. Check `status` before you act on `code`, as [Results and errors](results.md#error-responses) explains:
+
+```typescript
+const api = createFetch({
+  onError: (err, req) => {
+    if (err.status === 401 && err.code === "session_expired") location.assign("/login");
+    else if (err.status >= 500) console.warn(req.method, req.path, err.requestId);
+  },
+});
+```
+
+The hook's return value is ignored, and a throw or a rejected promise cannot replace the result. The library logs it with `console.error`, and the caller still gets its failure. A returned promise is not awaited, so a slow hook does not delay the caller. `err` is the same object the caller receives, so treat it as read-only. A `decode` failure on a 2xx response reaches the hook too, since the caller gets an error.
+
 ## Request options
 
-Every helper takes a last `RequestOptions` argument. The `apiPost`, `apiPut` and `apiPatch` helpers take the body as their second argument.
+Every helper takes a last `RequestOptions<T>` argument, or `BlobRequestOptions` to read the body with `as: "blob"`. `apiGetTyped` and `apiPostTyped` take `RequestOptions<T>` only. The `apiPost`, `apiPut` and `apiPatch` helpers take the body as their second argument.
 
 | Option | Description |
 | --- | --- |
@@ -48,6 +66,7 @@ Every helper takes a last `RequestOptions` argument. The `apiPost`, `apiPut` and
 | `decoder` | Validates a 2xx body. See [Decoders](results.md#decoders) |
 | `timeoutMs` | Overrides the 30,000 ms default for this request. Must be a finite number from 0 to `Number.MAX_SAFE_INTEGER` |
 | `ignoreBody` | Skips reading a 2xx body. `data` is `undefined` and the decoder is not called. Error bodies are still read |
+| `as` | `"json"`, the default, or `"blob"`. See [Binary responses](#binary-responses) |
 
 ```typescript
 const controller = new AbortController();
@@ -58,6 +77,19 @@ const res = await api.apiGetRaw("/slow", {
 });
 ```
 
+## Binary responses
+
+`as: "blob"` reads a 2xx body as a `Blob` instead of JSON, for an image, a subtitle file or any other body you hand to the browser. The result's `data` is typed `Blob`:
+
+```typescript
+const res = await api.apiGetRaw("/posters/42", { as: "blob" });
+if (res.ok) img.src = URL.createObjectURL(res.data);
+```
+
+The `Blob`'s `type` is the response's `Content-Type`, lowercased, or empty when there is none or it holds a character outside printable ASCII. An empty body and a 204 both give an empty `Blob`. `maxResponseBytes` caps the body as it does for JSON. A non-2xx response is still read as JSON, so its `code` and `body` reach you as with any other request.
+
+The compiler refuses a `decoder` or `ignoreBody` with `as: "blob"`, and a type argument other than `Blob`. From JavaScript, either option with `as: "blob"` is an `invalid` request and is not sent. `apiGetTyped` and `apiPostTyped` always read JSON.
+
 ## Timeouts
 
 Each request has a timeout of `API_TIMEOUT_MS`, 30,000 ms, unless `timeoutMs` sets another. The timeout covers the request on the network, not the `prepareHeaders` hook. When you pass a `signal`, the library combines it with the timeout, and whichever fires first stops the request. Your abort gives `code: "cancelled"` and the timeout gives `code: "timeout"`.
@@ -66,7 +98,7 @@ Each request has a timeout of `API_TIMEOUT_MS`, 30,000 ms, unless `timeoutMs` se
 
 ## Runtimes
 
-The library needs `AbortSignal.timeout`, which Chrome 103, Safari 16, Firefox 100 and Node 18 and later have. Combining your signal with the timeout also needs `AbortSignal.any`, which Chrome 116, Safari 17.4, Firefox 124 and Node 20.3 and later have. Without `AbortSignal.any`, `withTimeout` keeps the timeout and drops your signal, and the request is still sent.
+The library needs `AbortSignal.timeout`, which Chrome 103, Safari 16, Firefox 100 and Node 18 and later have. `withTimeout` combines your signal with the timeout through `AbortSignal.any`, which Chrome 116, Safari 17.4, Firefox 124 and Node 20.3 and later have. On an older runtime it uses its own listeners instead, so your abort cancels the request on every supported runtime.
 
 The package is TypeScript source and ESM only. Your bundler compiles it, and it needs TypeScript 5.0 or later. The test suite runs in headless Chromium, against the browser's own `fetch`, `Headers`, `URL` and `AbortSignal`.
 

@@ -16,7 +16,7 @@ It replaces the `try`/`catch`, the `response.ok` check and the `JSON.parse` you 
 - With an absolute base URL, an absolute or protocol-relative path cannot reach another origin.
 - It is about 2 kB minified and gzipped, and its tests run against Chromium's own `fetch`, `Headers` and `AbortSignal`.
 
-Consider [ky](https://github.com/sindresorhus/ky) if you want retries, hooks and upload and download progress in one client. Consider [ofetch](https://github.com/unjs/ofetch) if you need binary or streamed responses and automatic retries on Node, browsers and workers.
+Consider [ky](https://github.com/sindresorhus/ky) if you want retries, hooks and upload and download progress in one client. Consider [ofetch](https://github.com/unjs/ofetch) if you need streamed responses and automatic retries on Node, browsers and workers.
 
 ## Install
 
@@ -60,22 +60,34 @@ const User = z.object({ id: z.string(), name: z.string() });
 const user = await api.apiGetTyped("/users/me", (v) => User.parse(v)); // typed, or null
 ```
 
-Every helper takes a last `options` argument for a cancel signal, a timeout, extra headers, a decoder, a pre-encoded body, or skipping the success body:
+Every helper takes a last `options` argument for a cancel signal, a timeout, extra headers, a decoder, a pre-encoded body, skipping the success body, or reading it as a `Blob`:
 
 ```typescript
 const controller = new AbortController();
 await api.apiGetRaw("/slow", { signal: controller.signal, timeoutMs: 5_000 });
 await api.apiDeleteRaw("/items/1", { ignoreBody: true });
+const poster = await api.apiGet("/posters/42", { as: "blob" }); // a Blob, or null
+```
+
+To act on every failure in one place, such as sending the user to sign in when a session expires, give the instance an `onError` hook. It sees each failure with its `code` already read from the body, and nothing it throws or returns reaches the caller:
+
+```typescript
+export const api = createFetch({
+  baseUrl: "https://api.example.com/v1",
+  onError: (err) => {
+    if (err.status === 401 && err.code === "session_expired") location.assign("/login");
+  },
+});
 ```
 
 Put query parameters in the path, such as `/items?page=2`. To add a header that changes after startup, such as a token, read it inside the instance's `prepareHeaders` hook, which runs on every request. The timeout starts after `prepareHeaders` returns, so a hook that can hang needs its own limit. [Requests, timeouts and runtimes](docs/requests.md) covers every setting and option.
 
 ## API
 
-- Instance: `createFetch(config?)` returns a `FetchInstance`. `FetchConfig` holds `baseUrl`, `credentials`, `prepareHeaders`, `fetchFn` and `maxResponseBytes`.
+- Instance: `createFetch(config?)` returns a `FetchInstance`. `FetchConfig` holds `baseUrl`, `credentials`, `prepareHeaders`, `fetchFn`, `maxResponseBytes` and `onError`.
 - Requests on an instance: `requestRaw` and `request`, plus `apiGet`, `apiPost`, `apiPut`, `apiPatch` and `apiDelete` in a plain form that returns the data or `null` and a `*Raw` form that returns the full result. `apiGetTyped` and `apiPostTyped` also take a decoder.
 - Timeout: `withTimeout(signal, ms)` and `API_TIMEOUT_MS`, 30,000 ms.
-- Types: `ApiOk<T>`, `ApiErr`, `ApiResult<T>`, `Decoder<T>`, `HttpMethod`, `RequestOptions<T>`.
+- Types: `ApiOk<T>`, `ApiErr`, `ApiResult<T>`, `Decoder<T>`, `FailedRequest`, `HttpMethod`, `RequestOptions<T>` for JSON reads and `BlobRequestOptions` for `as: "blob"`.
 
 The full reference is on [JSR](https://jsr.io/@cplieger/fetch/doc).
 
@@ -101,7 +113,7 @@ The protection needs a `baseUrl` with a scheme and host. With an empty or relati
 
 ## Unsupported by design
 
-`@cplieger/fetch` has no retries or backoff, interceptor chains, response caching, decoder combinators, changeable or global settings, automatic idempotency-key or request-ID headers, or binary and streamed responses. [Unsupported by design](docs/non-goals.md) gives the reason for each and what to use instead.
+`@cplieger/fetch` has no retries or backoff, interceptor chains, response caching, decoder combinators, changeable or global settings, automatic idempotency-key or request-ID headers, or streamed responses. [Unsupported by design](docs/non-goals.md) gives the reason for each and what to use instead.
 
 ## Related projects
 

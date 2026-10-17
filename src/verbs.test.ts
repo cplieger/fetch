@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, expectTypeOf, vi, afterEach } from "vitest";
 import { createFetch } from "./instance.js";
-import type { Decoder } from "./types.js";
+import type { ApiResult, Decoder, RequestOptions } from "./types.js";
 
 function stubFetch(res: Response): typeof fetch {
   return vi.fn().mockResolvedValue(res) as unknown as typeof fetch;
@@ -178,5 +178,27 @@ describe("null body + empty body helpers", () => {
       data: undefined,
       headers: expect.any(Headers),
     });
+  });
+});
+
+describe("forwarding RequestOptions<T>", () => {
+  it("lets a generic wrapper pass its RequestOptions<T> to apiGetRaw and requestRaw", async () => {
+    const fx = createFetch({
+      fetchFn: () => Promise.resolve(new Response(JSON.stringify({ id: "a" }))),
+    });
+    function viaVerb<T>(path: string, opts?: RequestOptions<T>): Promise<ApiResult<T>> {
+      return fx.apiGetRaw<T>(path, opts);
+    }
+    function viaCore<T>(path: string, opts?: RequestOptions<T>): Promise<ApiResult<T>> {
+      return fx.requestRaw<T>("GET", path, opts);
+    }
+    const decoder: Decoder<{ id: string }> = (v) => v as { id: string };
+    const opts: RequestOptions<{ id: string }> = { decoder, timeoutMs: 1_000 };
+    const byVerb = await viaVerb("/x", opts);
+    const byCore = await viaCore("/x", opts);
+    expectTypeOf(byVerb).toEqualTypeOf<ApiResult<{ id: string }>>();
+    expectTypeOf(byCore).toEqualTypeOf<ApiResult<{ id: string }>>();
+    expect(byVerb).toMatchObject({ ok: true, data: { id: "a" } });
+    expect(byCore).toMatchObject({ ok: true, data: { id: "a" } });
   });
 });

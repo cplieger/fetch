@@ -13,28 +13,16 @@ export interface FetchInstance extends FetchVerbs {
 }
 
 /**
- * Create an isolated fetch instance. `config` is shallow-copied and frozen at
- * construction; two instances never share config, and a changed backend
- * produces a new instance. A hook that must read late-bound state (a token
- * set after boot) reads it from inside `prepareHeaders`, which runs per
- * request.
- *
- * Throws a `TypeError` on a `maxResponseBytes` of `NaN`: nothing is ever
- * `> NaN`, so such a cap would read unbounded while the caller believes a cap
- * is set (the shape `Number(process.env.MAX_BYTES)` produces when the variable
- * is unset). `Infinity` is accepted and means unlimited, as does leaving it
- * unset.
- *
- * @example
- * ```ts
- * export const api = createFetch({ baseUrl: "https://api.example.com/v1", credentials: "include" });
- * const user = await api.apiGet<User>("/me");
- * ```
+ * Create an isolated fetch instance. `config` is shallow-copied and frozen, so
+ * two instances never share settings and a changed backend is a new instance;
+ * read late-bound state, such as a token, inside `prepareHeaders`.
+ * Throws a `TypeError` on a `maxResponseBytes` that is `NaN` or negative.
  */
 export function createFetch(config: FetchConfig = {}): FetchInstance {
-  if (Number.isNaN(config.maxResponseBytes)) {
+  const max = config.maxResponseBytes;
+  if (max !== undefined && !(max >= 0)) {
     throw new TypeError(
-      "createFetch: maxResponseBytes must be a byte count (or Infinity for no cap), not NaN",
+      `createFetch: maxResponseBytes must be a byte count of 0 or more (or Infinity for no cap), not ${String(max)}`,
     );
   }
   const cfg: FetchConfig = Object.freeze({ ...config });
