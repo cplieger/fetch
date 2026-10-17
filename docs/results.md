@@ -10,7 +10,7 @@ This page lists what every request returns, for a developer writing the code tha
 | --- | --- | --- |
 | `ok` | both | `true` on a 2xx response, unless its body is not JSON or fails the decoder. `false` otherwise |
 | `status` | both | The HTTP status, or 0 when no response arrived |
-| `data` | `ApiOk` | The parsed or decoded body. `undefined` for a 204 or an empty body |
+| `data` | `ApiOk` | The parsed or decoded body, or a `Blob` under `as: "blob"`. `undefined` for a 204 or an empty body read as JSON |
 | `headers` | `ApiOk` | The response `Headers`, always present |
 | `error` | `ApiErr` | A readable message |
 | `code` | `ApiErr` | One of the library codes below, or a code the server sent |
@@ -29,7 +29,7 @@ This page lists what every request returns, for a developer writing the code tha
 | `decode` | the real 2xx status | The body was not JSON, or the decoder threw |
 | any other value | the real non-2xx status | The server sent it in the error body |
 
-A request is `invalid` when the body cannot be JSON-encoded, such as a circular object, a `BigInt`, a function or a symbol. It is also `invalid` when `body` and `rawBody` are both set, when a header name or value is rejected, or when `prepareHeaders` throws. A `timeoutMs` below 0, above `Number.MAX_SAFE_INTEGER` or not finite, such as `NaN` or `Infinity`, is `invalid` too. If your signal was already aborted, a build failure is reported as `cancelled` instead.
+A request is `invalid` when the body cannot be JSON-encoded, such as a circular object, a `BigInt`, a function or a symbol. It is also `invalid` when `body` and `rawBody` are both set, when JavaScript code passes `as: "blob"` with a `decoder` or `ignoreBody`, when a header name or value is rejected, or when `prepareHeaders` throws. A `timeoutMs` below 0, above `Number.MAX_SAFE_INTEGER` or not finite, such as `NaN` or `Infinity`, is `invalid` too. If your signal was already aborted, a build failure is reported as `cancelled` instead.
 
 A `decode` error message starts with `response not JSON:` or `response shape mismatch:`. On a decoder mismatch, `body` holds the parsed value the decoder refused.
 
@@ -49,6 +49,8 @@ A 409 whose body describes the conflict is readable from `res.body`. Validate it
 ## Empty bodies
 
 A 204, or a 2xx with an empty body, gives `data: undefined`. With a `*Raw` helper on an endpoint that can answer 204, type `T` to include `undefined`, or branch on `status`. A JSON `null`, `0`, `false` or `""` body is real data and passes through unchanged.
+
+Under `as: "blob"`, an empty 2xx body and a 204 both give an empty `Blob`, so `data` is always a `Blob` on success.
 
 `ignoreBody: true` skips reading a 2xx body and gives `data: undefined` without calling the decoder. An error body is still read.
 

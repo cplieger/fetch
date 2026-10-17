@@ -200,8 +200,8 @@ describe("createFetch — baseUrl origin protection", () => {
 });
 
 describe("createFetch — maxResponseBytes validation", () => {
-  // A 50 KB body: every `> NaN` comparison is false, so a NaN cap reads
-  // unbounded on both the declared-length and streamed paths in readBounded.
+  // A 50 KB body: every `> NaN` comparison is false, so a NaN cap would read
+  // unbounded on both the declared-length and streamed paths.
   const FIFTY_KB = "x".repeat(50_000);
   const bigBody = JSON.stringify({ s: FIFTY_KB });
 
@@ -258,6 +258,22 @@ describe("createFetch — maxResponseBytes validation", () => {
       code: "network",
       error: "response exceeds 10 bytes",
     });
+  });
+
+  it("refuses a negative cap at construction, which would refuse every non-empty body", () => {
+    expect(() => createFetch({ maxResponseBytes: -1 })).toThrow(TypeError);
+    expect(() => createFetch({ maxResponseBytes: -1 })).toThrow(/maxResponseBytes.*-1/);
+    expect(() => createFetch({ maxResponseBytes: Number.NEGATIVE_INFINITY })).toThrow(TypeError);
+  });
+
+  it("accepts a zero cap, which reads only empty bodies", async () => {
+    const empty = createFetch({
+      fetchFn: stubFetch(new Response(null, { status: 200 })),
+      maxResponseBytes: 0,
+    });
+    expect(await empty.requestRaw("GET", "/x")).toMatchObject({ ok: true, data: undefined });
+    const full = createFetch({ fetchFn: stubFetch(new Response("[1]")), maxResponseBytes: 0 });
+    expect(await full.requestRaw("GET", "/x")).toMatchObject({ ok: false, code: "network" });
   });
 
   it("accepts an unset cap and a finite positive cap unchanged", () => {

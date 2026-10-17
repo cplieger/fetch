@@ -415,6 +415,54 @@ describe("requestRaw — ignoreBody", () => {
     expect(read.done).toBe(true);
   });
 
+  it("resolves without waiting for a cancel that has not settled", async () => {
+    let cancelled = false;
+    let settle!: () => void;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+        return new Promise<void>((resolve) => {
+          settle = resolve;
+        });
+      },
+    });
+    const fx = createFetch({ fetchFn: stubFetch(new Response(body, { status: 200 })) });
+    const r = await fx.requestRaw("DELETE", "/x", { ignoreBody: true });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined, headers: expect.any(Headers) });
+    expect(cancelled).toBe(true);
+    settle();
+  });
+
+  it("resolves ok when the skipped body's cancel rejects", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+        throw new Error("cancel failed");
+      },
+    });
+    const fx = createFetch({ fetchFn: stubFetch(new Response(body, { status: 200 })) });
+    const r = await fx.requestRaw("DELETE", "/x", { ignoreBody: true });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined, headers: expect.any(Headers) });
+    expect(cancelled).toBe(true);
+  });
+
+  it("resolves ok when a custom fetchFn's body throws from cancel", async () => {
+    const res = {
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: {
+        cancel: () => {
+          throw new Error("cancel threw");
+        },
+      },
+    };
+    const fetchFn = (() => Promise.resolve(res)) as unknown as typeof fetch;
+    const r = await createFetch({ fetchFn }).requestRaw("DELETE", "/x", { ignoreBody: true });
+    expect(r).toEqual({ ok: true, status: 200, data: undefined, headers: expect.any(Headers) });
+  });
+
   it("still parses the error envelope on a non-2xx response", async () => {
     const fetchFn = stubFetch(
       new Response(JSON.stringify({ error: "nope", code: "denied" }), { status: 403 }),
@@ -784,7 +832,7 @@ describe("requestRaw — maxResponseBytes", () => {
     expect(r).toMatchObject({ ok: false, status: 413, error: "HTTP 413" });
   });
 
-  it("reads a null-body 2xx via res.text() when a cap is set", async () => {
+  it("reads a null-body 2xx as empty when a cap is set", async () => {
     const fetchFn = stubFetch(new Response(null, { status: 200 }));
     const fx = createFetch({ fetchFn, maxResponseBytes: 16 });
     const r = await fx.requestRaw("GET", "/x");

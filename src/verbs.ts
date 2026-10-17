@@ -1,17 +1,27 @@
-import type { ApiResult, Decoder, RequestFn, RequestOptions, RequestRawFn } from "./types.js";
+import type { RequestCore, RequestRawCore } from "./request.js";
+import type {
+  AnyRequestOptions,
+  ApiResult,
+  Decoder,
+  ReadVerb,
+  ReadVerbRaw,
+  RequestOptions,
+  WriteVerb,
+  WriteVerbRaw,
+} from "./types.js";
 
 /** The bundle of 12 verb helpers a fetch instance exposes. */
 export interface FetchVerbs {
   /** GET; returns the decoded body or `null` on any error. */
-  apiGet: <T>(path: string, opts?: RequestOptions<T>) => Promise<T | null>;
+  apiGet: ReadVerb;
   /** POST a JSON body; returns the decoded body or `null` on any error. */
-  apiPost: <T>(path: string, body?: unknown, opts?: RequestOptions<T>) => Promise<T | null>;
+  apiPost: WriteVerb;
   /** PUT a JSON body; returns the decoded body or `null` on any error. */
-  apiPut: <T>(path: string, body?: unknown, opts?: RequestOptions<T>) => Promise<T | null>;
+  apiPut: WriteVerb;
   /** PATCH a JSON body; returns the decoded body or `null` on any error. */
-  apiPatch: <T>(path: string, body?: unknown, opts?: RequestOptions<T>) => Promise<T | null>;
+  apiPatch: WriteVerb;
   /** DELETE; returns the decoded body or `null` on any error. */
-  apiDelete: <T>(path: string, opts?: RequestOptions<T>) => Promise<T | null>;
+  apiDelete: ReadVerb;
   /** GET with runtime validation; returns the decoded body or `null` on any error. */
   apiGetTyped: <T>(
     path: string,
@@ -26,33 +36,33 @@ export interface FetchVerbs {
     opts?: RequestOptions<T>,
   ) => Promise<T | null>;
   /** GET; returns the full {@link ApiResult} envelope. */
-  apiGetRaw: <T>(path: string, opts?: RequestOptions<T>) => Promise<ApiResult<T>>;
+  apiGetRaw: ReadVerbRaw;
   /** POST a JSON body; returns the full {@link ApiResult} envelope. */
-  apiPostRaw: <T>(path: string, body?: unknown, opts?: RequestOptions<T>) => Promise<ApiResult<T>>;
+  apiPostRaw: WriteVerbRaw;
   /** PUT a JSON body; returns the full {@link ApiResult} envelope. */
-  apiPutRaw: <T>(path: string, body?: unknown, opts?: RequestOptions<T>) => Promise<ApiResult<T>>;
+  apiPutRaw: WriteVerbRaw;
   /** PATCH a JSON body; returns the full {@link ApiResult} envelope. */
-  apiPatchRaw: <T>(path: string, body?: unknown, opts?: RequestOptions<T>) => Promise<ApiResult<T>>;
+  apiPatchRaw: WriteVerbRaw;
   /** DELETE; returns the full {@link ApiResult} envelope. */
-  apiDeleteRaw: <T>(path: string, opts?: RequestOptions<T>) => Promise<ApiResult<T>>;
+  apiDeleteRaw: ReadVerbRaw;
 }
 
 /** Bind the 12 verb helpers to a `(request, requestRaw)` pair. */
-export function makeVerbs(request: RequestFn, requestRaw: RequestRawFn): FetchVerbs {
+export function makeVerbs(request: RequestCore, requestRaw: RequestRawCore): FetchVerbs {
   return {
-    apiGet<T>(path: string, opts?: RequestOptions<T>): Promise<T | null> {
+    apiGet<T>(path: string, opts?: AnyRequestOptions<T>): Promise<T | null> {
       return request<T>("GET", path, opts);
     },
-    apiPost<T>(path: string, body?: unknown, opts?: RequestOptions<T>): Promise<T | null> {
+    apiPost<T>(path: string, body?: unknown, opts?: AnyRequestOptions<T>): Promise<T | null> {
       return request<T>("POST", path, { ...opts, body });
     },
-    apiPut<T>(path: string, body?: unknown, opts?: RequestOptions<T>): Promise<T | null> {
+    apiPut<T>(path: string, body?: unknown, opts?: AnyRequestOptions<T>): Promise<T | null> {
       return request<T>("PUT", path, { ...opts, body });
     },
-    apiPatch<T>(path: string, body?: unknown, opts?: RequestOptions<T>): Promise<T | null> {
+    apiPatch<T>(path: string, body?: unknown, opts?: AnyRequestOptions<T>): Promise<T | null> {
       return request<T>("PATCH", path, { ...opts, body });
     },
-    apiDelete<T>(path: string, opts?: RequestOptions<T>): Promise<T | null> {
+    apiDelete<T>(path: string, opts?: AnyRequestOptions<T>): Promise<T | null> {
       return request<T>("DELETE", path, opts);
     },
     apiGetTyped<T>(path: string, decoder: Decoder<T>, opts?: RequestOptions<T>): Promise<T | null> {
@@ -66,19 +76,27 @@ export function makeVerbs(request: RequestFn, requestRaw: RequestRawFn): FetchVe
     ): Promise<T | null> {
       return request<T>("POST", path, { ...opts, body, decoder });
     },
-    apiGetRaw<T>(path: string, opts?: RequestOptions<T>): Promise<ApiResult<T>> {
+    apiGetRaw<T>(path: string, opts?: AnyRequestOptions<T>): Promise<ApiResult<T>> {
       return requestRaw<T>("GET", path, opts);
     },
-    apiPostRaw<T>(path: string, body?: unknown, opts?: RequestOptions<T>): Promise<ApiResult<T>> {
+    apiPostRaw<T>(
+      path: string,
+      body?: unknown,
+      opts?: AnyRequestOptions<T>,
+    ): Promise<ApiResult<T>> {
       return requestRaw<T>("POST", path, { ...opts, body });
     },
-    apiPutRaw<T>(path: string, body?: unknown, opts?: RequestOptions<T>): Promise<ApiResult<T>> {
+    apiPutRaw<T>(path: string, body?: unknown, opts?: AnyRequestOptions<T>): Promise<ApiResult<T>> {
       return requestRaw<T>("PUT", path, { ...opts, body });
     },
-    apiPatchRaw<T>(path: string, body?: unknown, opts?: RequestOptions<T>): Promise<ApiResult<T>> {
+    apiPatchRaw<T>(
+      path: string,
+      body?: unknown,
+      opts?: AnyRequestOptions<T>,
+    ): Promise<ApiResult<T>> {
       return requestRaw<T>("PATCH", path, { ...opts, body });
     },
-    apiDeleteRaw<T>(path: string, opts?: RequestOptions<T>): Promise<ApiResult<T>> {
+    apiDeleteRaw<T>(path: string, opts?: AnyRequestOptions<T>): Promise<ApiResult<T>> {
       return requestRaw<T>("DELETE", path, opts);
     },
   };
