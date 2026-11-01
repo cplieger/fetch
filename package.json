@@ -33,7 +33,8 @@
     "vitest": "5.0.5"
   },
   "overrides": {
-    "qs": "^6.15.2"
+    "qs": "^6.15.2",
+    "minimatch": "^11.0.1"
   },
   "description": "Handle TypeScript JSON requests without throws, as typed results or data-or-null values",
   "license": "Apache-2.0",
