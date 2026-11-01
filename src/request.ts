@@ -1,13 +1,20 @@
 import type { FetchConfig } from "./types.js";
-import { API_TIMEOUT_MS, withTimeout } from "./timeout.js";
-import type {
-  ApiErr,
-  ApiResult,
-  HttpMethod,
-  RequestFn,
-  RequestOptions,
-  RequestRawFn,
-} from "./types.js";
+import { API_TIMEOUT_MS, requestSignal, type AbortSource } from "./timeout.js";
+import type { AnyRequestOptions, ApiErr, ApiResult, FailedRequest, HttpMethod } from "./types.js";
+
+/** The single implementation behind every `RequestRawFn` overload. */
+export type RequestRawCore = <T>(
+  method: HttpMethod,
+  path: string,
+  opts?: AnyRequestOptions<T>,
+) => Promise<ApiResult<T>>;
+
+/** The single implementation behind every `RequestFn` overload. */
+export type RequestCore = <T>(
+  method: HttpMethod,
+  path: string,
+  opts?: AnyRequestOptions<T>,
+) => Promise<T | null>;
 
 const JSON_CT = "application/json";
 
@@ -159,11 +166,11 @@ function classifyBuildError(e: unknown, callerSignal: AbortSignal | undefined): 
 
 /**
  * Classify a thrown error from the FETCH / response-read phase. Priority:
- * caller signal already aborted → "cancelled"; DOMException TimeoutError /
- * AbortError → "timeout"; everything else → "network".
+ * the caller's abort won the request signal → "cancelled"; DOMException
+ * TimeoutError / AbortError → "timeout"; everything else → "network".
  */
-function classifyThrown(e: unknown, callerSignal: AbortSignal | undefined): ApiErr {
-  if (callerSignal?.aborted === true) {
+function classifyThrown(e: unknown, winner: AbortSource | undefined): ApiErr {
+  if (winner === "caller") {
     return cancelledErr();
   }
   if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
@@ -172,44 +179,60 @@ function classifyThrown(e: unknown, callerSignal: AbortSignal | undefined): ApiE
   return makeErr(0, errMsg(e), "network");
 }
 
-/** Read a response body as text, optionally bounded to `max` bytes. When set,
- *  a `content-length` over the cap is rejected up front and the streamed body
- *  is aborted the moment it exceeds the cap, so an untrusted upstream cannot
- *  force unbounded buffering. */
-async function readBounded(res: Response, max: number | undefined): Promise<string> {
-  if (max === undefined) {
-    return res.text();
+/** Start releasing a body the decided result no longer reads, without
+ *  waiting: a cancel that throws, rejects or never settles cannot replace or
+ *  hold that result. */
+function releaseQuietly(cancel: () => Promise<void> | undefined): void {
+  try {
+    void cancel()?.catch(() => undefined);
+  } catch {
+    // A custom fetchFn's stream may throw where a platform one rejects.
   }
+}
+
+/** Read a response body's bytes, refusing more than `max`: a `content-length`
+ *  over the cap is rejected up front and the streamed body is aborted the
+ *  moment it exceeds the cap, so an untrusted upstream cannot force unbounded
+ *  buffering. */
+async function readChunks(res: Response, max: number): Promise<Uint8Array<ArrayBuffer>[]> {
   const contentLength = res.headers.get("content-length");
   if (contentLength !== null && Number(contentLength) > max) {
     throw new Error(`response exceeds ${max} bytes`);
   }
   const body = res.body;
   if (body === null) {
-    return res.text();
+    return [];
   }
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
   let total = 0;
   for (;;) {
     const result = await reader.read();
     if (result.done) {
-      break;
+      return chunks;
     }
     total += result.value.byteLength;
     if (total > max) {
-      await reader.cancel();
+      releaseQuietly(() => reader.cancel());
       throw new Error(`response exceeds ${max} bytes`);
     }
     chunks.push(result.value);
   }
-  const combined = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    combined.set(chunk, offset);
-    offset += chunk.byteLength;
+}
+
+/** Read a response body as text, bounded to `max` bytes when set. */
+async function readBoundedText(res: Response, max: number | undefined): Promise<string> {
+  if (max === undefined) {
+    return res.text();
   }
-  return new TextDecoder().decode(combined);
+  return new Blob(await readChunks(res, max)).text();
+}
+
+/** Read a response body as a `Blob` typed by its `Content-Type`, bounded to
+ *  `max` bytes when set. */
+async function readBoundedBlob(res: Response, max: number | undefined): Promise<Blob> {
+  const type = res.headers.get("content-type") ?? "";
+  return new Blob(await readChunks(res, max ?? Number.POSITIVE_INFINITY), { type });
 }
 
 /** Parse a non-2xx response body, lifting error / code / request_id fields. */
@@ -220,7 +243,7 @@ async function parseErrorResponse(res: Response, max: number | undefined): Promi
   let requestId: string | undefined;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readBounded(res, max));
+    parsed = JSON.parse(await readBoundedText(res, max));
     if (isRecord(parsed)) {
       const errField = parsed["error"];
       if (typeof errField === "string") {
@@ -241,17 +264,40 @@ async function parseErrorResponse(res: Response, max: number | undefined): Promi
   return makeErr(status, error, code, requestId, res.headers, parsed);
 }
 
+function logObserverError(e: unknown): void {
+  try {
+    console.error("@cplieger/fetch: onError threw", e);
+  } catch {
+    // A throwing console cannot reach the caller either.
+  }
+}
+
+/** Hand a failure to the instance's observer, which must never change or
+ *  delay the result its caller receives. */
+function notify(
+  onError: NonNullable<FetchConfig["onError"]>,
+  err: ApiErr,
+  req: FailedRequest,
+): void {
+  try {
+    Promise.resolve(onError(err, req)).catch(logObserverError);
+  } catch (e) {
+    logObserverError(e);
+  }
+}
+
 /**
  * Build the non-throwing request core bound to an immutable config, captured
  * once at instance construction ({@link createFetch}).
  */
-export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
-  return async function requestRaw<T>(
+export function makeRequestRaw(cfg: FetchConfig): RequestRawCore {
+  const perform = async function perform<T>(
     method: HttpMethod,
     path: string,
-    opts?: RequestOptions<T>,
+    opts?: AnyRequestOptions<T>,
   ): Promise<ApiResult<T>> {
     let callerSignal: AbortSignal | undefined;
+    let winner: () => AbortSource | undefined;
 
     // --- Build phase ------------------------------------------------------
     // A throw here is a client-side "invalid" request (or "cancelled" if the
@@ -263,6 +309,11 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
       const headers = new Headers();
       if (opts?.rawBody !== undefined && opts.body != null) {
         throw new TypeError("body and rawBody are mutually exclusive");
+      }
+      // The option types refuse this pairing; a JavaScript caller can still pass it.
+      const loose: { as?: unknown; decoder?: unknown; ignoreBody?: unknown } | undefined = opts;
+      if (loose?.as === "blob" && (loose.decoder !== undefined || loose.ignoreBody === true)) {
+        throw new TypeError('as: "blob" excludes decoder and ignoreBody');
       }
       if (method !== "GET" && opts?.rawBody !== undefined) {
         init.body = opts.rawBody;
@@ -289,7 +340,9 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
         init.credentials = cfg.credentials;
       }
 
-      init.signal = withTimeout(callerSignal, opts?.timeoutMs ?? API_TIMEOUT_MS);
+      const composed = requestSignal(callerSignal, opts?.timeoutMs ?? API_TIMEOUT_MS);
+      init.signal = composed.signal;
+      winner = composed.winner;
       url = joinUrl(cfg.baseUrl, path);
     } catch (e) {
       return classifyBuildError(e, callerSignal);
@@ -302,7 +355,7 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
       const fetchImpl = cfg.fetchFn ?? fetch;
       res = await fetchImpl(url, init);
     } catch (e) {
-      return classifyThrown(e, callerSignal);
+      return classifyThrown(e, winner());
     }
 
     // --- Response phase -----------------------------------------------------
@@ -315,20 +368,20 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
         return await parseErrorResponse(res, cfg.maxResponseBytes);
       }
       const status = statusOf(res);
+      if (opts?.as === "blob") {
+        const blob = await readBoundedBlob(res, cfg.maxResponseBytes);
+        return { ok: true, status, data: blob as T, headers: res.headers };
+      }
       if (status === 204) {
         return { ok: true, status, data: undefined as T, headers: res.headers };
       }
 
       if (opts?.ignoreBody === true) {
-        try {
-          await res.body?.cancel();
-        } catch {
-          // Releasing the unread body is best-effort.
-        }
+        releaseQuietly(() => res.body?.cancel());
         return { ok: true, status, data: undefined as T, headers: res.headers };
       }
 
-      const text = await readBounded(res, cfg.maxResponseBytes);
+      const text = await readBoundedText(res, cfg.maxResponseBytes);
       if (text === "") {
         return { ok: true, status, data: undefined as T, headers: res.headers };
       }
@@ -357,8 +410,20 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
 
       return { ok: true, status, data: parsed as T, headers: res.headers };
     } catch (e) {
-      return classifyThrown(e, callerSignal);
+      return classifyThrown(e, winner());
     }
+  };
+
+  return async function requestRaw<T>(
+    method: HttpMethod,
+    path: string,
+    opts?: AnyRequestOptions<T>,
+  ): Promise<ApiResult<T>> {
+    const result = await perform(method, path, opts);
+    if (!result.ok && cfg.onError !== undefined) {
+      notify(cfg.onError, result, { method, path });
+    }
+    return result;
   };
 }
 
@@ -366,11 +431,11 @@ export function makeRequestRaw(cfg: FetchConfig): RequestRawFn {
  * Build a null-collapsing `request` over a `requestRaw`: the decoded data on a
  * successful result, or `null` on any error.
  */
-export function makeRequest(raw: RequestRawFn): RequestFn {
+export function makeRequest(raw: RequestRawCore): RequestCore {
   return async function request<T>(
     method: HttpMethod,
     path: string,
-    opts?: RequestOptions<T>,
+    opts?: AnyRequestOptions<T>,
   ): Promise<T | null> {
     const result = await raw<T>(method, path, opts);
     return result.ok && result.data !== undefined ? result.data : null;

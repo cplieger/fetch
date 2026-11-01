@@ -17,11 +17,11 @@ With no `baseUrl`, `path` goes to `fetch()` unchanged. Your code then owns the w
 
 ## Response size cap
 
-`maxResponseBytes` caps the response body. It is unset by default, which means no limit, and `Infinity` means the same. With a cap, a response whose `content-length` is over it, or whose streamed body grows past it, is refused instead of buffered. This guards a server-side caller against a hostile upstream.
+`maxResponseBytes` caps the response body, read as JSON or as a `Blob`. It is unset by default, which means no limit, and `Infinity` means the same. With a cap, a response whose `content-length` is over it, or whose streamed body grows past it, is refused instead of buffered. This guards a server-side caller against a hostile upstream.
 
 A 2xx body over the cap gives `code: "network"` with `status` 0. An error body over the cap is dropped, and `error` falls back to `HTTP <status>`.
 
-`createFetch` throws a `TypeError` for a cap of `NaN`, which is what `Number(process.env.MAX_BYTES)` gives when the variable is unset. A `NaN` cap would never be reached, so the body would be read without a limit while the code looks capped.
+`createFetch` throws a `TypeError` for a cap of `NaN`, which is what `Number(process.env.MAX_BYTES)` gives when the variable is unset. A `NaN` cap would never be reached, so the body would be read without a limit while the code looks capped. It throws for a negative cap too, which would refuse every body that is not empty. A cap of 0 accepts only empty bodies.
 
 ## Server-controlled fields
 
