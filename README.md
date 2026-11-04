@@ -1,5 +1,8 @@
 # fetch
 
+> Moved into [`@cplieger/ui`](https://github.com/cplieger/ui): import `@cplieger/ui/fetch` instead, as the [migration guide](https://github.com/cplieger/ui/blob/main/docs/migrating.md) shows.
+> **Archived 2026-11-04. This repository is read-only. The published package stays available.**
+
 [![npm](https://img.shields.io/npm/v/@cplieger/fetch)](https://www.npmjs.com/package/@cplieger/fetch) [![JSR](https://jsr.io/badges/@cplieger/fetch)](https://jsr.io/@cplieger/fetch) [![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/fetch/badges/mutation-ts.json)](https://github.com/cplieger/fetch/issues?q=label%3Astryker-tracker)
 
 `@cplieger/fetch` wraps the platform `fetch` for TypeScript so JSON requests never throw. Each call returns a typed success or error value, or only the data or `null` when that is all you need.
